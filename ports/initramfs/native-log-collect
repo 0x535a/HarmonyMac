@@ -1,0 +1,72 @@
+#!/bin/sh
+# Early native diagnostics. Persist only to the known U393 root, or authorized ESP.
+export PATH=/bin
+reason=${1:-snapshot}
+boot_id=$(cat /proc/sys/kernel/random/boot_id)
+logdir=/run/hmos-native-logs
+mkdir -p "$logdir" /sys/kernel/debug /run/hmos-log-target
+mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null || true
+{
+    echo "REASON=$reason BOOT_ID=$boot_id"
+    echo '=== CMDLINE ==='; cat /proc/cmdline
+    echo '=== UPTIME ==='; cat /proc/uptime
+    echo '=== KERNEL ==='; cat /proc/version
+    echo '=== PARTITIONS ==='; cat /proc/partitions
+    echo '=== MODULES ==='; cat /proc/modules
+    echo '=== MOUNTS ==='; cat /proc/mounts
+    echo '=== MODULE LOAD LOG ==='; cat /run/hmos-native-module-load.log 2>/dev/null
+    echo '=== DEFERRED PROBES ==='; cat /sys/kernel/debug/devices_deferred 2>/dev/null
+    echo '=== USB DEVICES ==='; ls -l /sys/bus/usb/devices/ 2>/dev/null
+    for d in /sys/class/usb_role/* /sys/class/typec/* /sys/bus/spmi/devices/* /sys/bus/usb/devices/* /sys/bus/platform/devices/*.cio /sys/bus/platform/devices/*.usb /sys/bus/platform/devices/*.phy; do
+        test -e "$d" || continue
+        echo "=== DEVICE $d ==="
+        ls -ld "$d" "$d/driver" "$d/supplier:"* 2>/dev/null
+        for attr in role data_role power_role port_type uevent modalias idVendor idProduct product serial; do
+            if test -f "$d/$attr"; then echo "ATTR=$attr"; cat "$d/$attr"; fi
+        done
+    done
+    echo '=== PLATFORM DRIVER BINDINGS ==='
+    for driver in phy-apple-atc dwc3-apple apple-spmi-controller sn201202x thunderbolt-apple-acio thunderbolt-apple-nhi appledrm; do
+        ls -l /sys/bus/platform/drivers/"$driver"/ /sys/bus/spmi/drivers/"$driver"/ 2>/dev/null
+    done
+} >"$logdir/state-$reason.txt" 2>&1
+/bin/kernel-log >"$logdir/kernel-$reason.log" 2>"$logdir/kernel-read-error.txt"
+# If original root is already mounted writable, do not mount the same device again.
+if grep -q ' /newroot ext4 rw' /proc/mounts; then
+    target=/newroot/data/boot/aurora/native-diagnostics/$boot_id
+    mkdir -p "$target"
+    busybox cp "$logdir/"* "$target/" && sync && echo "HMOS_NATIVE_LOG_SAVED=$target"
+    exit
+fi
+# Identify by filesystem UUID, never by the current sdX/nvme numbering.
+for dev in /dev/sd*[0-9] /dev/nvme*n*p[0-9] /dev/vd*[0-9]; do
+    test -b "$dev" || continue
+    if test "$(/bin/ext4-uuid "$dev")" = de5b04b6-597d-4382-b6a3-9e04388ccd6d; then
+        # Do not remount the readonly rescue root merely to store diagnostics.
+        if grep -q ' /newroot ' /proc/mounts; then continue; fi
+        if mount -t ext4 -o rw,nosuid,nodev,noexec "$dev" /run/hmos-log-target; then
+            target=/run/hmos-log-target/data/boot/aurora/native-diagnostics/$boot_id
+            mkdir -p "$target"
+            busybox cp "$logdir/"* "$target/" && sync
+            busybox umount /run/hmos-log-target
+            echo "HMOS_NATIVE_LOG_SAVED_U393=$boot_id"
+            exit
+        fi
+    fi
+done
+# User authorized this fallback: only an existing, known FAT ESP and our log subtree.
+for dev in /dev/nvme*n*p[0-9]; do
+    test -b "$dev" || continue
+    test "$(/bin/fat-uuid "$dev")" = 7892-13ee || continue
+    if mount -t vfat -o rw,nosuid,nodev,noexec "$dev" /run/hmos-log-target; then
+        if test -f /run/hmos-log-target/harmonyos/7.2.11-aurora-hmos-j514s-test7/Image; then
+            target=/run/hmos-log-target/harmonyos/diagnostics/$boot_id
+            mkdir -p "$target"
+            busybox cp "$logdir/"* "$target/" && sync
+            echo "HMOS_NATIVE_LOG_SAVED_ESP=$boot_id"
+        fi
+        busybox umount /run/hmos-log-target
+        exit
+    fi
+done
+echo "HMOS_NATIVE_LOG_BUFFERED=$logdir"

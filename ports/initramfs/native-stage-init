@@ -1,0 +1,108 @@
+#!/bin/sh
+# Native Apple bootstrap. Physical root selection is UUID-based; rescue is default.
+export PATH=/bin:/sbin
+export HOME=/
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /dev/pts /newroot /run
+mount -t devpts devpts /dev/pts
+mount -t tmpfs -o mode=0755 tmpfs /run
+exec >/dev/console 2>&1
+rescue() {
+    echo "HMOS_NATIVE_RESCUE: $*"
+    /bin/native-log-collect "$1"
+    if test "$1" = root-not-found; then
+        echo HMOS_NATIVE_BLOCK_DEVICES
+        cat /proc/partitions
+        echo HMOS_NATIVE_MODULE_ERRORS
+        cat /run/hmos-native-module-load.log
+    fi
+    # Only an explicit diskless negative test may power off automatically.
+    if test "$selftest" = missing-root && test "$1" = root-not-found; then
+        echo HMOS_NATIVE_MISSING_ROOT_TEST_PASS
+        sync
+        poweroff -f
+    fi
+    exec setsid sh -c 'exec sh -i </dev/console >/dev/console 2>&1'
+}
+root_uuid= mode=rescue selftest=
+for arg in $(cat /proc/cmdline); do
+    case "$arg" in
+        hmos.root_uuid=*) root_uuid=${arg#*=};;
+        hmos.mode=*) mode=${arg#*=};;
+        hmos.selftest=*) selftest=${arg#*=};;
+    esac
+done
+test "$root_uuid" = de5b04b6-597d-4382-b6a3-9e04388ccd6d || rescue unexpected-root-uuid
+case "$mode" in rescue|boot) ;; *) rescue invalid-mode;; esac
+echo HMOS_NATIVE_BOOTSTRAP_BEGIN
+cat /proc/version
+# Use modules from this initramfs only, matched to this exact kernel release.
+test "$(uname -r)" = 7.2.11-aurora-hmos-j514s-test7 || rescue kernel-module-version-mismatch
+for module in pinctrl-apple-gpio gpio-shared-proxy spi-apple i2c-pasemi-platform \
+    spmi-apple-controller apple_nvmem_spmi macsmc gpio-macsmc sn201202x tps6598x \
+    phy-apple-atc dwc3-apple thunderbolt_apple onboard_usb_dev \
+    mux-apple-display-crossbar phy-apple-dptx typec_displayport \
+    apple-sart nvme-apple apple-rtkit-helper apple-sio apple-dockchannel \
+    dockchannel-hid spi-hid-apple-of hid-apple hid-magicmouse hid-multitouch macsmc-input; do
+    modprobe "$module" >>/run/hmos-native-module-load.log 2>&1 || echo "HMOS_NATIVE_MODULE_LOAD_FAILED name=$module"
+ done
+# External Type-C connector graphs include DCP mode-switch providers. Waiting
+# until after the USB root mount to register those providers can leave the PD
+# controller deferred, so the USB host never enumerates the root disk.
+modprobe apple-pmp >>/run/hmos-native-module-load.log 2>&1 || echo HMOS_NATIVE_MODULE_LOAD_FAILED name=apple-pmp
+modprobe appledrm >>/run/hmos-native-module-load.log 2>&1 || echo HMOS_NATIVE_MODULE_LOAD_FAILED name=appledrm
+root_device=
+for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45; do
+    for alias in $(find /sys/devices -name modalias -type f 2>/dev/null); do
+        modprobe "$(cat "$alias")" 2>/dev/null || true
+    done
+    for dev in /dev/sd*[0-9] /dev/nvme*n*p[0-9] /dev/mmcblk*p[0-9] /dev/vd*[0-9]; do
+        test -b "$dev" || continue
+        if test "$(/bin/ext4-uuid "$dev")" = "$root_uuid"; then
+            test -z "$root_device" || test "$root_device" = "$dev" || rescue duplicate-root-uuid
+            root_device=$dev
+        fi
+    done
+    test -n "$root_device" && break
+    sleep 1
+done
+test -n "$root_device" || rescue root-not-found
+# First native rescue boot must not replay journal or change p5.
+mount -t ext4 -o ro,noload "$root_device" /newroot || rescue cannot-mount-root-readonly
+test -x /newroot/system/bin/init || rescue original-init-missing
+test "$(readlink /newroot/init)" = /system/bin/init || rescue unexpected-init-link
+echo "HMOS_NATIVE_ROOT_FOUND device=$root_device uuid=$root_uuid"
+modprobe appledrm 2>/dev/null || true
+ls -l /dev/dri /dev/input 2>/dev/null
+if test "$mode" = rescue; then
+    echo HMOS_NATIVE_READONLY_RESCUE_READY
+    rescue requested-readonly-rescue
+fi
+# This file is installed only by the separately audited native root adaptation.
+test -f /newroot/boot/aurora-migration/native-ready-test7 || rescue native-root-not-prepared
+test ! -f /newroot/boot/aurora-migration/local-virtual-only || rescue virtual-only-root-refused
+mount -o remount,rw,noatime /newroot || rescue cannot-remount-root
+/bin/native-log-collect root-mounted
+mkdir -p /dev/binderfs /dev/unix/socket /sys/fs/selinux
+mount -t binder binder /dev/binderfs || rescue binderfs-failed
+binder-setup || rescue binder-nodes-failed
+chown 0:3020 /dev/access_token_id || rescue access-token-missing
+chmod 0666 /dev/access_token_id
+modprobe hmos_ashmem || rescue ashmem-module-failed
+mount -t selinuxfs selinuxfs /sys/fs/selinux || rescue selinuxfs-failed
+for node in /dev/dri/card* /dev/dri/renderD*; do
+    test ! -c "$node" || chmod 0666 "$node"
+done
+test ! -d /dev/input || input-device-permissions 6696 6696
+mkdir -p /newroot/data/boot/aurora /newroot/dev /newroot/proc /newroot/sys /newroot/run /newroot/tmp
+chmod 1777 /newroot/tmp
+cat /proc/cmdline >/newroot/data/boot/aurora/native-last-cmdline.txt
+/bin/kernel-log >/newroot/data/boot/aurora/native-bootstrap-kernel.log
+mount --move /sys /newroot/sys || rescue move-sys-failed
+mount --move /proc /newroot/proc || rescue move-proc-failed
+mount --move /run /newroot/run || rescue move-run-failed
+mount --move /dev /newroot/dev || rescue move-dev-failed
+echo HMOS_NATIVE_SWITCH_ROOT
+exec switch_root /newroot /init --second-stage

@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0
+config ACCESS_TOKENID
+	bool "HarmonyOS access-token process identity"
+	default n

@@ -1,0 +1,653 @@
+/*
+ * Copyright (c) 2023 Huawei Device Co., Ltd.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package ohos.hdi.display.composer.v1_0;
+sequenceable OHOS.HDI.Display.HdifdParcelable;
+
+enum DispCmd {
+    /* request cmd */
+    REQUEST_CMD_PREPARE_DISPLAY_LAYERS = 64,
+    REQUEST_CMD_SET_DISPLAY_CLIENT_BUFFER = 65,
+    REQUEST_CMD_SET_DISPLAY_CLIENT_DAMAGE = 66,
+    REQUEST_CMD_COMMIT = 67,
+    REQUEST_CMD_SET_LAYER_ALPHA = 68,
+    REQUEST_CMD_SET_LAYER_REGION = 69,
+    REQUEST_CMD_SET_LAYER_CROP = 70,
+    REQUEST_CMD_SET_LAYER_ZORDER = 71,
+    REQUEST_CMD_SET_LAYER_PREMULTI = 72,
+    REQUEST_CMD_SET_LAYER_TRANSFORM_MODE = 73,
+    REQUEST_CMD_SET_LAYER_DIRTY_REGION = 74,
+    REQUEST_CMD_SET_LAYER_VISIBLE_REGION = 75,
+    REQUEST_CMD_SET_LAYER_BUFFER = 76,
+    REQUEST_CMD_SET_LAYER_COMPOSITION_TYPE = 77,
+    REQUEST_CMD_SET_LAYER_BLEND_TYPE = 78,
+    REQUEST_CMD_SET_LAYER_VISIBLE = 79,
+    REQUEST_CMD_SET_LAYER_MASK_INFO = 80,
+    REQUEST_CMD_SET_LAYER_COLOR = 81,
+    REQUEST_CMD_BUTT,
+    /* reply cmd */
+    REPLY_CMD_SET_ERROR = 512,
+    REPLY_CMD_PREPARE_DISPLAY_LAYERS = 513,
+    REPLY_CMD_COMMIT = 514,
+    REPLY_CMD_BUTT,
+    /* Pack control cmd */
+    CONTROL_CMD_REQUEST_BEGIN = 1024,
+    CONTROL_CMD_REPLY_BEGIN = 1025,
+    CONTROL_CMD_REQUEST_END = 1026,
+    CONTROL_CMD_REPLY_END = 1027,
+    CONTROL_CMD_BUTT
+};
+
+/**
+ * @brief Enumerates return values of the functions.
+ *
+ */
+enum DispErrCode {
+    DISPLAY_SUCCESS = 0,            /**< Success */
+    DISPLAY_FAILURE = -1,           /**< Failure */
+    DISPLAY_FD_ERR = -2,            /**< File handle (FD) error */
+    DISPLAY_PARAM_ERR = -3,         /**< Parameter error */
+    DISPLAY_NULL_PTR = -4,          /**< Null pointer */
+    DISPLAY_NOT_SUPPORT = -5,       /**< Unsupported feature */
+    DISPLAY_NOMEM = -6,             /**< Insufficient memory */
+    DISPLAY_SYS_BUSY = -7,          /**< System busy */
+    DISPLAY_NOT_PERM = -8           /**< Forbidden operation */
+};
+
+/**
+ * @brief Enumerates pixel formats.
+ *
+ */
+enum PixelFormat {
+    PIXEL_FMT_CLUT8 = 0,                 /**< CLUT8 format */
+    PIXEL_FMT_CLUT1,                     /**< CLUT1 format */
+    PIXEL_FMT_CLUT4,                     /**< CLUT4 format */
+    PIXEL_FMT_RGB_565,                   /**< RGB565 format */
+    PIXEL_FMT_RGBA_5658,                 /**< RGBA5658 format */
+    PIXEL_FMT_RGBX_4444,                 /**< RGBX4444 format */
+    PIXEL_FMT_RGBA_4444,                 /**< RGBA4444 format */
+    PIXEL_FMT_RGB_444,                   /**< RGB444 format */
+    PIXEL_FMT_RGBX_5551,                 /**< RGBX5551 format */
+    PIXEL_FMT_RGBA_5551,                 /**< RGBA5551 format */
+    PIXEL_FMT_RGB_555,                   /**< RGB555 format */
+    PIXEL_FMT_RGBX_8888,                 /**< RGBX8888 format */
+    PIXEL_FMT_RGBA_8888,                 /**< RGBA8888 format */
+    PIXEL_FMT_RGB_888,                   /**< RGB888 format */
+    PIXEL_FMT_BGR_565,                   /**< BGR565 format */
+    PIXEL_FMT_BGRX_4444,                 /**< BGRX4444 format */
+    PIXEL_FMT_BGRA_4444,                 /**< BGRA4444 format */
+    PIXEL_FMT_BGRX_5551,                 /**< BGRX5551 format */
+    PIXEL_FMT_BGRA_5551,                 /**< BGRA5551 format */
+    PIXEL_FMT_BGRX_8888,                 /**< BGRX8888 format */
+    PIXEL_FMT_BGRA_8888,                 /**< BGRA8888 format */
+    PIXEL_FMT_YUV_422_I,                 /**< YUV422 interleaved format */
+    PIXEL_FMT_YCBCR_422_SP,              /**< YCBCR422 semi-planar format */
+    PIXEL_FMT_YCRCB_422_SP,              /**< YCRCB422 semi-planar format */
+    PIXEL_FMT_YCBCR_420_SP,              /**< YCBCR420 semi-planar format */
+    PIXEL_FMT_YCRCB_420_SP,              /**< YCRCB420 semi-planar format */
+    PIXEL_FMT_YCBCR_422_P,               /**< YCBCR422 planar format */
+    PIXEL_FMT_YCRCB_422_P,               /**< YCRCB422 planar format */
+    PIXEL_FMT_YCBCR_420_P,               /**< YCBCR420 planar format */
+    PIXEL_FMT_YCRCB_420_P,               /**< YCRCB420 planar format */
+    PIXEL_FMT_YUYV_422_PKG,              /**< YUYV422 packed format */
+    PIXEL_FMT_UYVY_422_PKG,              /**< UYVY422 packed format */
+    PIXEL_FMT_YVYU_422_PKG,              /**< YVYU422 packed format */
+    PIXEL_FMT_VYUY_422_PKG,              /**< VYUY422 packed format */
+    PIXEL_FMT_RGBA_1010102,              /**< RGBA_1010102 vendor format*/
+    PIXEL_FMT_VENDER_MASK = 0X7FFF0000,  /**< vendor mask format */
+    PIXEL_FMT_BUTT = 0X7FFFFFFF          /**< Invalid pixel format */
+};
+
+/* *
+ * @brief Defines the buffer usage.
+ *
+ */
+enum BufferUsage : unsigned long {
+    HBM_USE_CPU_READ = (1ULL << 0),        /**< CPU read buffer */
+    HBM_USE_CPU_WRITE = (1ULL << 1),       /**< CPU write memory */
+    HBM_USE_MEM_MMZ = (1ULL << 2),         /**< Media memory zone (MMZ) */
+    HBM_USE_MEM_DMA = (1ULL << 3),         /**< Direct memory access (DMA) buffer */
+    HBM_USE_MEM_SHARE = (1ULL << 4),       /**< Shared memory buffer*/
+    HBM_USE_MEM_MMZ_CACHE = (1ULL << 5),   /**< MMZ with cache*/
+    HBM_USE_MEM_FB = (1ULL << 6),          /**< Framebuffer */
+    HBM_USE_ASSIGN_SIZE = (1ULL << 7),     /**< Memory assigned */
+    HBM_USE_HW_RENDER = (1ULL << 8),       /**< For GPU write case */
+    HBM_USE_HW_TEXTURE = (1ULL << 9),      /**< For GPU read case */
+    HBM_USE_HW_COMPOSER = (1ULL << 10),    /**< For hardware composer */
+    HBM_USE_PROTECTED = (1ULL << 11),      /**< For safe buffer case, such as DRM */
+    HBM_USE_CAMERA_READ = (1ULL << 12),    /**< For camera read case */
+    HBM_USE_CAMERA_WRITE = (1ULL << 13),   /**< For camera write case */
+    HBM_USE_VIDEO_ENCODER = (1ULL << 14),  /**< For encode case */
+    HBM_USE_VIDEO_DECODER = (1ULL << 15),  /**< For decode case */
+    HBM_USE_CPU_READ_OFTEN = (1ULL << 16), /**< For read often */
+    HBM_USE_VENDOR_PRI0 = (1ULL << 44),    /**< Reserverd for vendor */
+    HBM_USE_VENDOR_PRI1 = (1ULL << 45),    /**< Reserverd for vendor */
+    HBM_USE_VENDOR_PRI2 = (1ULL << 46),    /**< Reserverd for vendor */
+    HBM_USE_VENDOR_PRI3 = (1ULL << 47),    /**< Reserverd for vendor */
+    HBM_USE_VENDOR_PRI4 = (1ULL << 48),    /**< Reserverd for vendor */
+    HBM_USE_VENDOR_PRI5 = (1ULL << 49),    /**< Reserverd for vendor */
+    HBM_USE_VENDOR_PRI6 = (1ULL << 50),    /**< Reserverd for vendor */
+    HBM_USE_VENDOR_PRI7 = (1ULL << 51),    /**< Reserverd for vendor */
+    HBM_USE_VENDOR_PRI8 = (1ULL << 52),    /**< Reserverd for vendor */
+    HBM_USE_VENDOR_PRI9 = (1ULL << 53),    /**< Reserverd for vendor */
+    HBM_USE_VENDOR_PRI10 = (1ULL << 54),   /**< Reserverd for vendor */
+    HBM_USE_VENDOR_PRI11 = (1ULL << 55),   /**< Reserverd for vendor */
+    HBM_USE_VENDOR_PRI12 = (1ULL << 56),   /**< Reserverd for vendor */
+    HBM_USE_VENDOR_PRI13 = (1ULL << 57),   /**< Reserverd for vendor */
+    HBM_USE_VENDOR_PRI14 = (1ULL << 58),   /**< Reserverd for vendor */
+    HBM_USE_VENDOR_PRI15 = (1ULL << 59),   /**< Reserverd for vendor */
+    HBM_USE_VENDOR_PRI16 = (1ULL << 60),   /**< Reserverd for vendor */
+    HBM_USE_VENDOR_PRI17 = (1ULL << 61),   /**< Reserverd for vendor */
+    HBM_USE_VENDOR_PRI18 = (1ULL << 62),   /**< Reserverd for vendor */
+    HBM_USE_VENDOR_PRI19 = (1ULL << 63),   /**< Reserverd for vendor */
+};
+
+/**
+ * @brief Enumerates transform types of images.
+ *
+ */
+enum TransformType {
+    ROTATE_NONE = 0,                /**< No rotation */
+    ROTATE_90,                      /**< Rotation by 90 degrees */
+    ROTATE_180,                     /**< Rotation by 180 degrees */
+    ROTATE_270,                     /**< Rotation by 270 degrees */
+    MIRROR_H,                       /**< Mirror transform horizontally */
+    MIRROR_V,                       /**< Mirror transform vertically */
+    MIRROR_H_ROTATE_90,             /**< Mirror transform horizontally, rotation by 90 degrees */
+    MIRROR_V_ROTATE_90,             /**< Mirror transform vertically, rotation by 90 degrees */
+    ROTATE_BUTT                     /**< Invalid operation */
+};
+
+enum DispPowerStatus {
+    POWER_STATUS_ON = 0,            /**< The power status is on */
+    POWER_STATUS_STANDBY = 1,       /**< The power status is standby */
+    POWER_STATUS_SUSPEND = 2,       /**< The power status is suspended */
+    POWER_STATUS_OFF = 3,           /**< The power status is off */
+    POWER_STATUS_BUTT               /**< The power status is invalid */
+};
+
+/**
+ * @brief Enumerates power status.
+ */
+enum CompositionType {
+    COMPOSITION_CLIENT,       /**< Client composition type. The composer should be the CPU or GPU. */
+    COMPOSITION_DEVICE,       /**< Device composition type. The composer should be the hardware. */
+    COMPOSITION_CURSOR,       /**< Cursor composition type, used for cursor. */
+    COMPOSITION_VIDEO,        /**< Cursor composition type, used for video. */
+    COMPOSITION_DEVICE_CLEAR, /**< Device clear composition type, the device will clear the target region. */
+    COMPOSITION_CLIENT_CLEAR, /**< Client clear composition type, the service will clear the target region. */
+    COMPOSITION_TUNNEL,       /**< Tunnel composition type, used for tunnel. */
+    COMPOSITION_BUTT          /**< Invalid composition type */
+};
+
+/**
+ * @brief Enumerates layer types.
+ *
+ */
+enum LayerType {
+    LAYER_TYPE_GRAPHIC,             /**< Graphic layer */
+    LAYER_TYPE_OVERLAY,             /**< Overlay layer */
+    LAYER_TYPE_SDIEBAND,            /**< Sideband layer */
+    LAYER_TYPE_CURSOR,              /**< Cursor layer */
+    LAYER_TYPE_BUTT                 /**< Invalid layer type */
+};
+
+/**
+ * @brief Enumerates image blending types.
+ *
+ * The system combines images based on a specified blending type during hardware acceleration.
+ *
+ */
+enum BlendType {
+    BLEND_NONE = 0,                 /**< No blending */
+    BLEND_CLEAR,                    /**< CLEAR blending */
+    BLEND_SRC,                      /**< SRC blending */
+    BLEND_SRCOVER,                  /**< SRC_OVER blending */
+    BLEND_DSTOVER,                  /**< DST_OVER blending */
+    BLEND_SRCIN,                    /**< SRC_IN blending */
+    BLEND_DSTIN,                    /**< DST_IN blending */
+    BLEND_SRCOUT,                   /**< SRC_OUT blending */
+    BLEND_DSTOUT,                   /**< DST_OUT blending */
+    BLEND_SRCATOP,                  /**< SRC_ATOP blending */
+    BLEND_DSTATOP,                  /**< DST_ATOP blending */
+    BLEND_ADD,                      /**< ADD blending */
+    BLEND_XOR,                      /**< XOR blending */
+    BLEND_DST,                      /**< DST blending */
+    BLEND_AKS,                      /**< AKS blending */
+    BLEND_AKD,                      /**< AKD blending */
+    BLEND_BUTT                      /**< Invalid blend type */
+};
+
+/**
+ * @brief Enumerates ROP types supported by hardware acceleration.
+ *
+ * ROP performs bitwise Boolean operations (including bitwise AND and bitwise OR) on the RGB color and
+ * alpha values of the foreground bitmap with those of the background bitmap, and then outputs the result.
+ *
+ */
+enum RopType {
+    ROP_BLACK = 0,                  /**< Blackness */
+    ROP_NOTMERGEPEN,                /**< ~(S2+S1) */
+    ROP_MASKNOTPEN,                 /**< ~S2&S1 */
+    ROP_NOTCOPYPEN,                 /**< ~S2 */
+    ROP_MASKPENNOT,                 /**< S2&~S1 */
+    ROP_NOT,                        /**< ~S1 */
+    ROP_XORPEN,                     /**< S2^S1 */
+    ROP_NOTMASKPEN,                 /**< ~(S2&S1) */
+    ROP_MASKPEN,                    /**< S2&S1 */
+    ROP_NOTXORPEN,                  /**< ~(S2^S1) */
+    ROP_NOP,                        /**< S1 */
+    ROP_MERGENOTPEN,                /**< ~S2+S1 */
+    ROP_COPYPE,                     /**< S2 */
+    ROP_MERGEPENNOT,                /**< S2+~S1 */
+    ROP_MERGEPEN,                   /**< S2+S1 */
+    ROP_WHITE,                      /**< Whiteness */
+    ROP_BUTT                        /**< Invalid ROP type */
+};
+
+/**
+ * @brief Enumerates color key types supported by hardware acceleration.
+ *
+ */
+enum ColorKey {
+    CKEY_NONE = 0,                  /**< No color key */
+    CKEY_SRC,                       /**< Source color key */
+    CKEY_DST,                       /**< Destination color key */
+    CKEY_BUTT                       /**< Null operation */
+};
+
+/**
+ * @brief Enumerates mirror types supported by hardware acceleration.
+ *
+ */
+enum MirrorType {
+    MIRROR_NONE = 0,                /**< No mirror */
+    MIRROR_LR,                      /**< Left and right mirrors */
+    MIRROR_TB,                      /**< Top and bottom mirrors */
+    MIRROR_BUTT                     /**< Null operation */
+};
+
+/**
+ * @brief Enumerates connection types of hot plugging.
+ *
+ */
+enum Connection {
+    CON_INVALID = 0,                /**< Invalid connection */
+    CONNECTED,                      /**< Connected */
+    DISCONNECTED                    /**< Disconnected */
+};
+
+/**
+ * @brief Enumerates interface types.
+ *
+ */
+enum InterfaceType {
+    DISP_INTF_HDMI = 0,             /**< HDMI interface */
+    DISP_INTF_LCD,                  /**< LCD interface */
+    DISP_INTF_BT1120,               /**< BT1120 interface */
+    DISP_INTF_BT656,                /**< BT656 interface */
+    DISP_INTF_YPBPR,                /**< YPBPR interface */
+    DISP_INTF_RGB,                  /**< RGB interface */
+    DISP_INTF_CVBS,                 /**< CVBS interface */
+    DISP_INTF_SVIDEO,               /**< SVIDEO interface */
+    DISP_INTF_VGA,                  /**< VGA interface */
+    DISP_INTF_MIPI,                 /**< MIPI interface */
+    DISP_INTF_PANEL,                /**< PANEL interface */
+    DISP_INTF_BUTT,
+};
+
+/**
+ * @brief Defines property object which contains name, property id and value.
+ *
+ */
+struct PropertyObject {
+    String name;                    /**< Name of the property */
+    unsigned int propId;            /**< Property id which was decided in the DRM internal */
+    unsigned long value;            /**< the value of property  */
+};
+
+/**
+ * @brief Defines the capability of the output.
+ */
+struct DisplayCapability {
+    String name;                    /**< Name of the display device */
+    enum InterfaceType type;        /**< Interface type of panel */
+    unsigned int phyWidth;          /**< Physical width */
+    unsigned int phyHeight;         /**< Physical height */
+    unsigned int supportLayers;     /**< Number of supported layers */
+    unsigned int virtualDispCount;  /**< Count of virtual displays supported */
+    boolean supportWriteBack;       /**< Whether writeback is supported */
+    unsigned int propertyCount;     /**< Count of properties */
+    struct PropertyObject[] props;  /**< Array of property objects */
+};
+
+/**
+ * @brief Defines output mode info.
+ */
+struct DisplayModeInfo {
+    int width;                      /**< Width in pixel */
+    int height;                     /**< Height in pixel */
+    unsigned int freshRate;         /**< Fresh rate per second */
+    int id;                         /**< ID of the mode */
+};
+
+/**
+ * @brief Defines layer information.
+ *
+ * <b>LayerInfo</b> must be passed to the {@link OpenLayer} function, which creates a layer based on the layer
+ * information.
+ *
+ */
+struct LayerInfo {
+    int width;                      /**< Layer width */
+    int height;                     /**< Layer height */
+    enum LayerType type;            /**< Layer type, which can be a graphic layer, overlay layer, or sideband layer */
+    int bpp;                        /**< Number of bits occupied by each pixel */
+    enum PixelFormat pixFormat;     /**< Pixel format of the layer */
+};
+
+/**
+ * @brief Defines alpha information about a layer.
+ *
+ */
+struct LayerAlpha {
+    boolean enGlobalAlpha;          /**< Global alpha enable bit */
+    boolean enPixelAlpha;           /**< Pixel alpha enable bit */
+    unsigned char alpha0;           /**< Alpha0 value, ranging from 0 to 255 */
+    unsigned char alpha1;           /**< Alpha1 value, ranging from 0 to 255 */
+    unsigned char gAlpha;           /**< Global alpha value, ranging from 0 to 255 */
+};
+
+/**
+ * @brief Defines the information about a rectangle.
+ *
+ */
+struct IRect {
+    int x;                          /**< Start X coordinate of the rectangle */
+    int y;                          /**< Start Y coordinate of the rectangle */
+    int w;                          /**< Width of the rectangle */
+    int h;                          /**< Height of the rectangle */
+};
+
+/**
+ * @brief Stores surface information for hardware acceleration, such as draw image and bit blit.
+ *
+ */
+struct ISurface {
+    unsigned long phyAddr;          /**< Start physical address of an image */
+    int height;                     /**< Image height */
+    int width;                      /**< Image width */
+    int stride;                     /**< Image stride */
+    enum PixelFormat enColorFmt;    /**< Image format */
+    boolean bYCbCrClut;             /**< Whether the color lookup table (CLUT) is in the YCbCr space */
+    boolean bAlphaMax255;           /**< Maximum alpha value of an image (255 or 128) */
+    boolean bAlphaExt1555;          /**< ARGB1555 alpha extension enable bit */
+    unsigned char alpha0;           /**< Value of alpha0, ranging from 0 to 255 */
+    unsigned char alpha1;           /**< Value of alpha1, ranging from 0 to 255 */
+    unsigned long cbcrPhyAddr;      /**< CbCr physical address */
+    int cbcrStride;                 /**< CbCr stride */
+    unsigned long clutPhyAddr;      /**< Start physical address of the CLUT, used for color extension or correction */
+};
+
+/**
+ * @brief Describes a line to help draw lines in hardware acceleration.
+ *
+ */
+struct ILine {
+    int x0;                         /**< X coordinate of the start point of a line */
+    int y0;                         /**< Y coordinate of the start point of a line */
+    int x1;                         /**< X coordinate of the end point of a line */
+    int y1;                         /**< Y coordinate of the end point of a line */
+    unsigned int color;             /**< Line color */
+};
+
+/**
+ * @brief Describes a circle to help draw circles in hardware acceleration.
+ *
+ */
+struct ICircle {
+    int x;                          /**< X coordinate of a circle center */
+    int y;                          /**< Y coordinate of a circle center */
+    int r;                          /**< Radius of a circle */
+    unsigned int color;             /**< Circle color */
+};
+
+/**
+ * @brief Describes a rectangle to help draw rectangles in hardware acceleration.
+ *
+ */
+struct Rectangle {
+    struct IRect rect;              /**< Bounds of a rectangle */
+    unsigned int color;             /**< Rectangle color */
+};
+
+/**
+ * @brief Defines hardware acceleration options.
+ *
+ */
+struct GfxOpt {
+    boolean enGlobalAlpha;          /**< Global alpha enable bit */
+    unsigned int globalAlpha;       /**< Global alpha value */
+    boolean enPixelAlpha;           /**< Pixel alpha enable bit */
+    enum BlendType blendType;       /**< Blending type */
+    enum ColorKey colorKeyFrom;     /**< Color key mode */
+    boolean enableRop;              /**< Raster operations pipeline (ROP) enable bit */
+    enum RopType colorRopType;      /**< Color ROP type */
+    enum RopType alphaRopType;      /**< Alpha ROP type */
+    boolean enableScale;            /**< Scaling enable bit */
+    enum TransformType rotateType;  /**< Rotation type */
+    enum MirrorType mirrorType;     /**< Mirror type */
+};
+
+/**
+ * @brief Enumerates the composition types of the special layer.
+ */
+enum ColorGamut {
+    COLOR_GAMUT_INVALID = -1,           /**< Invalid */
+    COLOR_GAMUT_NATIVE = 0,             /**< Native or default */
+    COLOR_GAMUT_STANDARD_BT601 = 1,     /**< Standard BT601 */
+    COLOR_GAMUT_STANDARD_BT709 = 2,     /**< Standard BT709 */
+    COLOR_GAMUT_DCI_P3 = 3,             /**< DCI P3 */
+    COLOR_GAMUT_SRGB = 4,               /**< SRGB */
+    COLOR_GAMUT_ADOBE_RGB = 5,          /**< Adobe RGB */
+    COLOR_GAMUT_DISPLAY_P3 = 6,         /**< display P3 */
+    COLOR_GAMUT_BT2020 = 7,             /**< BT2020 */
+    COLOR_GAMUT_BT2100_PQ = 8,          /**< BT2100 PQ */
+    COLOR_GAMUT_BT2100_HLG = 9,         /**< BT2100 HLG */
+    COLOR_GAMUT_DISPLAY_BT2020 = 10,    /**< Display BT2020 */
+};
+
+/**
+ * @brief Enumerates the color gamut maps.
+ *
+ */
+enum GamutMap {
+    GAMUT_MAP_CONSTANT = 0,
+    GAMUT_MAP_EXPANSION = 1,
+    GAMUT_MAP_HDR_CONSTANT = 2,
+    GAMUT_MAP_HDR_EXPANSION = 3,
+};
+
+/**
+ * @brief Enumerates the color data spaces.
+ *
+ */
+enum ColorDataSpace {
+    COLOR_DATA_SPACE_UNKNOWN = 0,
+    GAMUT_BT601 = 0x00000001,
+    GAMUT_BT709 = 0x00000002,
+    GAMUT_DCI_P3 = 0x00000003,
+    GAMUT_SRGB = 0x00000004,
+    GAMUT_ADOBE_RGB = 0x00000005,
+    GAMUT_DISPLAY_P3 = 0x00000006,
+    GAMUT_BT2020 = 0x00000007,
+    GAMUT_BT2100_PQ = 0x00000008,
+    GAMUT_BT2100_HLG = 0x00000009,
+    GAMUT_DISPLAY_BT2020 = 0x0000000a,
+    TRANSFORM_FUNC_UNSPECIFIED = 0x00000100,
+    TRANSFORM_FUNC_LINEAR = 0x00000200,
+    TRANSFORM_FUNC_SRGB = 0x00000300,
+    TRANSFORM_FUNC_SMPTE_170M = 0x00000400,
+    TRANSFORM_FUNC_GM2_2 = 0x00000500,
+    TRANSFORM_FUNC_GM2_6 = 0x00000600,
+    TRANSFORM_FUNC_GM2_8 = 0x00000700,
+    TRANSFORM_FUNC_ST2084 = 0x00000800,
+    TRANSFORM_FUNC_HLG = 0x00000900,
+    PRECISION_UNSPECIFIED = 0x00010000,
+    PRECISION_FULL = 0x00020000,
+    PRESION_LIMITED = 0x00030000,
+    PRESION_EXTENDED = 0x00040000,
+    BT601_SMPTE170M_FULL = 1 | 1024 | 131072,    // GAMUT_BT601 | TRANSFORM_FUNC_SMPTE_170M | PRECISION_FULL,
+    BT601_SMPTE170M_LIMITED = 1 | 1024 | 196608, // GAMUT_BT601 | TRANSFORM_FUNC_SMPTE_170M | PRESION_LIMITED,
+    BT709_LINEAR_FULL = 2 | 512 | 131072,        // GAMUT_BT709 | TRANSFORM_FUNC_LINEAR | PRECISION_FULL,
+    BT709_LINEAR_EXTENDED = 2 | 512 | 262144,    // GAMUT_BT709 | TRANSFORM_FUNC_LINEAR | PRESION_EXTENDED,
+    BT709_SRGB_FULL = 2 | 768 | 131072,          // GAMUT_BT709 | TRANSFORM_FUNC_SRGB | PRECISION_FULL,
+    BT709_SRGB_EXTENDED = 2 | 768 | 262144,      // GAMUT_BT709 | TRANSFORM_FUNC_SRGB | PRESION_EXTENDED,
+    BT709_SMPTE170M_LIMITED = 2 | 1024 | 196608, // GAMUT_BT709 | TRANSFORM_FUNC_SMPTE_170M | PRESION_LIMITED,
+    DCI_P3_LINEAR_FULL = 3 | 512 | 131072,       // GAMUT_DCI_P3 | TRANSFORM_FUNC_LINEAR | PRECISION_FULL,
+    DCI_P3_GAMMA26_FULL = 3 | 1536 | 131072,     // GAMUT_DCI_P3 | TRANSFORM_FUNC_GM2_6 | PRECISION_FULL,
+    DISPLAY_P3_LINEAR_FULL = 6 | 512 | 131072,   // GAMUT_DISPLAY_P3 | TRANSFORM_FUNC_LINEAR | PRECISION_FULL,
+    DCI_P3_SRGB_FULL = 3 | 768 | 131072,         // GAMUT_DCI_P3 | TRANSFORM_FUNC_SRGB | PRECISION_FULL,
+    ADOBE_RGB_GAMMA22_FULL = 5 | 1280 | 131072,  // GAMUT_ADOBE_RGB | TRANSFORM_FUNC_GM2_2 | PRECISION_FULL,
+    BT2020_LINEAR_FULL = 7 | 512 | 131072,       // GAMUT_BT2020 | TRANSFORM_FUNC_LINEAR | PRECISION_FULL,
+    BT2020_SRGB_FULL = 7 | 768 | 131072,         // GAMUT_BT2020 | TRANSFORM_FUNC_SRGB | PRECISION_FULL,
+    BT2020_SMPTE170M_FULL = 7 | 1024 | 131072,   // GAMUT_BT2020 | TRANSFORM_FUNC_SMPTE_170M | PRECISION_FULL,
+    BT2020_ST2084_FULL = 7 | 2048 | 131072,      // GAMUT_BT2020 | TRANSFORM_FUNC_ST2084 | PRECISION_FULL,
+    BT2020_HLG_FULL = 7 | 2304 | 131072,         // GAMUT_BT2020 | TRANSFORM_FUNC_HLG | PRECISION_FULL,
+    BT2020_ST2084_LIMITED = 7 | 2048 | 196608,   // GAMUT_BT2020 | TRANSFORM_FUNC_ST2084 | PRESION_LIMITED,
+};
+
+/**
+ * @brief Enumerates the HDR formats.
+ *
+ */
+enum HDRFormat {
+    NOT_SUPPORT_HDR = 0,
+    DOLBY_VISION = 1,
+    HDR10 = 2,
+    HLG = 3,
+    HDR10_PLUS = 4,
+    HDR_VIVID = 5,
+};
+
+/**
+ * @brief Defines the HDR capability.
+ *
+ */
+struct HDRCapability {
+    unsigned int formatCount;
+    enum HDRFormat[] formats;
+    float maxLum;
+    float maxAverageLum;
+    float minLum;
+};
+
+/**
+ * @brief Enumerates the HDR metadata keys.
+ *
+ */
+enum HDRMetadataKey {
+    MATAKEY_RED_PRIMARY_X = 0,
+    MATAKEY_RED_PRIMARY_Y = 1,
+    MATAKEY_GREEN_PRIMARY_X = 2,
+    MATAKEY_GREEN_PRIMARY_Y = 3,
+    MATAKEY_BLUE_PRIMARY_X = 4,
+    MATAKEY_BLUE_PRIMARY_Y = 5,
+    MATAKEY_WHITE_PRIMARY_X = 6,
+    MATAKEY_WHITE_PRIMARY_Y = 7,
+    MATAKEY_MAX_LUMINANCE = 8,
+    MATAKEY_MIN_LUMINANCE = 9,
+    MATAKEY_MAX_CONTENT_LIGHT_LEVEL = 10,
+    MATAKEY_MAX_FRAME_AVERAGE_LIGHT_LEVEL = 11,
+    MATAKEY_HDR10_PLUS = 12,
+    MATAKEY_HDR_VIVID = 13,
+};
+
+/**
+ * @brief Defines the HDR metadata.
+ *
+ */
+struct HDRMetaData {
+    enum HDRMetadataKey key;
+    float value;
+};
+
+/**
+ * @brief Enumerates the present timestamp types.
+ *
+ */
+enum PresentTimestampType {
+    HARDWARE_DISPLAY_PTS_UNSUPPORTED = 0,       /**< Unsupported */
+    HARDWARE_DISPLAY_PTS_DELAY = 1 << 0,        /**< Delay */
+    HARDWARE_DISPLAY_PTS_TIMESTAMP = 1 << 1,    /**< Timestamp */
+};
+
+/**
+ * @brief Enumerates the layer mask info.
+ *
+ */
+enum MaskInfo {
+    LAYER_NORAML = 0,
+    LAYER_HBM_SYNC = 1,
+};
+
+/**
+ * @brief Defines the present timestamp.
+ *
+ */
+struct PresentTimestamp {
+    enum PresentTimestampType type;     /**< Present timestamp type */
+    long time;                          /**< Present timestamp value */
+};
+
+/**
+ * @brief Defines the present timestamp.
+ *
+ */
+struct ExtDataHandle {
+    int fd;                         /**< Handle fd, -1 if not supported */
+    unsigned int reserveInts;       /**< the number of reserved integer value */
+    int[] reserve;                  /**< the reserved data */
+};
+
+struct YUVDescInfo {
+    unsigned long baseAddr;         /**< Base address of memory */
+    unsigned int yOffset;           /**< Offset of Y */
+    unsigned int uOffset;           /**< Offset of U */
+    unsigned int vOffset;           /**< Offset of V */
+    unsigned int yStride;           /**< Stride of Y */
+    unsigned int uvStride;          /**< Stride of UV */
+    unsigned int uvStep;            /**< Step of UV */
+};
+
+/**
+ * @brief Defines hdi fd info.
+ *
+ */
+struct HdifdInfo {
+    int id;
+    HdifdParcelable hdiFd;
+};
+
+/**
+ * @brief Defines structure of layer color setting
+ *
+ */
+struct LayerColor {
+    unsigned char r;
+    unsigned char g;
+    unsigned char b;
+    unsigned char a;
+};

@@ -1,0 +1,117 @@
+--- a/src/gallium/auxiliary/driver_ddebug/dd_draw.c
++++ b/src/gallium/auxiliary/driver_ddebug/dd_draw.c
+@@ -1279,6 +1279,98 @@
+    }
+ }
+ 
++/* Optional Linux diagnostic: preserve up to 64 active/recent draw snapshots.
++ * Never overwrite a slot while its real draw is executing; cap each state
++ * snapshot at 2 MiB minus footer space. Rendering is still done by the driver.
++ */
++#ifdef __linux__
++#include <fcntl.h>
++#include <unistd.h>
++
++static int dd_bounded_slots[64];
++static unsigned dd_bounded_sequence;
++struct dd_bounded_output { int fd; size_t bytes; };
++
++static ssize_t
++dd_bounded_write(void *data, const char *buffer, size_t length)
++{
++   struct dd_bounded_output *out = data;
++   size_t count = MIN2(length, 2 * 1024 * 1024 - 512 - out->bytes);
++   size_t done = 0;
++   while (done < count) {
++      ssize_t ret = write(out->fd, buffer + done, count - done);
++      if (ret < 0 && errno == EINTR)
++         continue;
++      if (ret <= 0)
++         return -1;
++      done += ret;
++   }
++   out->bytes += done;
++   return length;
++}
++
++static unsigned
++dd_bounded_before_draw(struct dd_draw_record *record, char *path, size_t size)
++{
++   const char *dir = debug_get_option("GALLIUM_DDEBUG_DRAW_DIR", NULL);
++   if (!dir || dir[0] != '/' || strlen(dir) > 400)
++      return UINT_MAX;
++   uint64_t now_ms = os_time_get_nano() / 1000000;
++   uint64_t first = debug_get_num_option("GALLIUM_DDEBUG_DRAW_START_MS", 0);
++   uint64_t last = debug_get_num_option("GALLIUM_DDEBUG_DRAW_END_MS", INT64_MAX);
++   if (now_ms < first || now_ms > last)
++      return UINT_MAX;
++   unsigned sequence = p_atomic_inc_return(&dd_bounded_sequence);
++   unsigned slot = sequence % ARRAY_SIZE(dd_bounded_slots);
++   unsigned tried = 0;
++   while (p_atomic_cmpxchg(&dd_bounded_slots[slot], 0, 1) != 0) {
++      if (++tried == ARRAY_SIZE(dd_bounded_slots))
++         return UINT_MAX;
++      slot = (slot + 1) % ARRAY_SIZE(dd_bounded_slots);
++   }
++   snprintf(path, size, "%s/rs%u-slot%02u.txt", dir, (unsigned)getpid(), slot);
++   int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
++   if (fd < 0) {
++      p_atomic_set(&dd_bounded_slots[slot], 0);
++      return UINT_MAX;
++   }
++   struct dd_bounded_output out = {fd, 0};
++   cookie_io_functions_t io = {.write = dd_bounded_write};
++   FILE *f = fopencookie(&out, "w", io);
++   if (!f) {
++      close(fd);
++      p_atomic_set(&dd_bounded_slots[slot], 0);
++      return UINT_MAX;
++   }
++   fprintf(f, "DDEBUG_DRAW_BEGIN seq=%u slot=%u mono_ms=%llu draw=%u\n",
++           sequence, slot, (unsigned long long)now_ms, record->draw_call);
++   dd_write_header(f, record->dctx->pipe->screen,
++                   record->draw_state.base.apitrace_call_number);
++   dd_write_record(f, record);
++   fclose(f);
++   close(fd);
++   fprintf(stderr, "DDEBUG_DRAW_BEGIN seq=%u slot=%u draw=%u path=%s\n",
++           sequence, slot, record->draw_call, path);
++   return slot;
++}
++
++static void
++dd_bounded_after_draw(unsigned slot, const char *path, uint64_t started)
++{
++   if (slot == UINT_MAX)
++      return;
++   uint64_t duration = os_time_get_nano() - started;
++   FILE *f = fopen(path, "a");
++   if (f) {
++      fprintf(f, "DDEBUG_DRAW_END driver_ns=%llu\n", (unsigned long long)duration);
++      fclose(f);
++   }
++   fprintf(stderr, "DDEBUG_DRAW_END slot=%u driver_ns=%llu\n",
++           slot, (unsigned long long)duration);
++   p_atomic_set(&dd_bounded_slots[slot], 0);
++}
++#endif
++
+ static void
+ dd_context_draw_vbo(struct pipe_context *_pipe,
+                     const struct pipe_draw_info *info,
+@@ -1317,7 +1409,15 @@
+    }
+ 
+    dd_before_draw(dctx, record);
++#ifdef __linux__
++   char bounded_path[512];
++   unsigned bounded_slot = dd_bounded_before_draw(record, bounded_path, sizeof(bounded_path));
++   uint64_t driver_started = os_time_get_nano();
++#endif
+    pipe->draw_vbo(pipe, info, drawid_offset, indirect, draws, num_draws);
++#ifdef __linux__
++   dd_bounded_after_draw(bounded_slot, bounded_path, driver_started);
++#endif
+    dd_after_draw(dctx, record);
+ }
+ 

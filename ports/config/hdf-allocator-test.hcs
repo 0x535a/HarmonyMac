@@ -1,0 +1,25 @@
+// Diagnostic subset of the ISO's HDF display configuration. Host 0 only.
+root {
+    module = "hdf";
+    device_info {
+        match_attr = "hdf_manager";
+        allocator {
+            hostName = "allocator_host";
+            priority = 50;
+            uid = "root";
+            gid = ["root"];
+            caps = ["DAC_OVERRIDE", "DAC_READ_SEARCH"];
+            allocator_device {
+                device0 {
+                    policy = 2;
+                    priority = 100;
+                    moduleName = "liballocator_driver_1.0.z.so";
+                    serviceName = "allocator_service";
+                    preload = 0;
+                    permission = 0x1b0;
+                    deviceMatchAttr = "";
+                }
+            }
+        }
+    }
+}

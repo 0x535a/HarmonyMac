@@ -1,0 +1,64 @@
+--- a/drivers/android/binder_alloc.c
++++ b/drivers/android/binder_alloc.c
+@@ -249,6 +249,38 @@
+ 	mmap_read_unlock(mm);
+ 
+ 	return npages > 0 ? page : NULL;
++}
++
++/* Map remaining user leaves of an already installed native backing page.
++ * vm_insert_page() installs one process-granule leaf in mixed-granule mm.
++ * Keep the native allocation, shrinker ownership and fault mapping coherent.
++ */
++vm_fault_t binder_alloc_fault(struct binder_alloc *alloc, struct vm_fault *vmf)
++{
++#ifdef CONFIG_MM_SUBPAGE
++    unsigned long address = vmf->address;
++    unsigned long offset;
++    struct page *page;
++    vm_fault_t ret = VM_FAULT_SIGBUS;
++
++    if (mm_page_size(vmf->vma->vm_mm) == PAGE_SIZE)
++        return ret;
++    mutex_lock(&alloc->mutex);
++    if (!binder_alloc_is_mapped(alloc) || address < alloc->vm_start)
++        goto out;
++    offset = address - alloc->vm_start;
++    if (offset >= alloc->buffer_size)
++        goto out;
++    page = binder_get_installed_page(alloc, offset / PAGE_SIZE);
++    if (page)
++        ret = vmf_insert_page_offset(vmf->vma, address, page,
++                                    offset_in_page(offset));
++out:
++    mutex_unlock(&alloc->mutex);
++    return ret;
++#else
++    return VM_FAULT_SIGBUS;
++#endif
+ }
+ 
+ static int binder_page_insert(struct binder_alloc *alloc,
+--- a/drivers/android/binder_alloc.h
++++ b/drivers/android/binder_alloc.h
+@@ -133,6 +133,7 @@
+ int binder_alloc_shrinker_init(void);
+ void binder_alloc_shrinker_exit(void);
+ void binder_alloc_vma_close(struct binder_alloc *alloc);
++vm_fault_t binder_alloc_fault(struct binder_alloc *alloc, struct vm_fault *vmf);
+ struct binder_buffer *
+ binder_alloc_prepare_to_free(struct binder_alloc *alloc,
+ 			     unsigned long user_ptr);
+--- a/drivers/android/binder.c
++++ b/drivers/android/binder.c
+@@ -6079,7 +6079,9 @@
+ 
+ VISIBLE_IF_KUNIT vm_fault_t binder_vm_fault(struct vm_fault *vmf)
+ {
+-	return VM_FAULT_SIGBUS;
++    struct binder_proc *proc = vmf->vma->vm_private_data;
++
++    return binder_alloc_fault(&proc->alloc, vmf);
+ }
+ EXPORT_SYMBOL_IF_KUNIT(binder_vm_fault);
+ 

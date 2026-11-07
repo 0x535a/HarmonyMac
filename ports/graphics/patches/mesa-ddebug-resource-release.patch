@@ -1,0 +1,28 @@
+--- a/src/gallium/auxiliary/driver_ddebug/dd_context.c
++++ b/src/gallium/auxiliary/driver_ddebug/dd_context.c
+@@ -678,6 +678,17 @@
+    struct pipe_context *pipe = dd_context(_pipe)->pipe;
+ 
+    pipe->texture_barrier(pipe, flags);
++}
++
++/* Resource release is mandatory for Mesa frontend buffer orphaning. Keep the
++ * underlying driver's ownership semantics instead of leaving a NULL callback.
++ */
++static void
++dd_context_resource_release(struct pipe_context *_pipe,
++                            struct pipe_resource *resource)
++{
++   struct pipe_context *pipe = dd_context(_pipe)->pipe;
++   pipe->resource_release(pipe, resource);
+ }
+ 
+ static void
+@@ -935,6 +946,7 @@
+    CTX_INIT(texture_barrier);
+    CTX_INIT(memory_barrier);
+    CTX_INIT(resource_commit);
++   CTX_INIT(resource_release);
+    CTX_INIT(set_global_binding);
+    /* create_video_codec */
+    /* create_video_buffer */

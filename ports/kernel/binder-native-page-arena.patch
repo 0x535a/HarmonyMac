@@ -1,0 +1,35 @@
+--- a/drivers/android/binder_alloc.c
++++ b/drivers/android/binder_alloc.c
+@@ -910,11 +910,28 @@
+ 		failure_string = "already mapped";
+ 		goto err_already_mapped;
+ 	}
+-	alloc->buffer_size = min_t(unsigned long, vma->vm_end - vma->vm_start,
+-				   SZ_4M);
++	/*
++	 * Binder's backing pages, LRU and page-array indices use the kernel
++	 * PAGE_SIZE. A mixed-granule userspace VMA can start/end on a smaller
++	 * boundary. Keep the usable arena inside complete native pages:
++	 * rounding buffer->user_data down must never precede vm_start, and
++	 * rounding its end up must never exceed the allocated page array.
++	 * The userspace mmap address/length remain unchanged; transactions
++	 * return pointers into this interior arena. Prefix/suffix slack is
++	 * not used as transaction storage. Native-aligned VMAs are unchanged.
++	 */
++	alloc->vm_start = PAGE_ALIGN(vma->vm_start);
++	if (alloc->vm_start >= vma->vm_end ||
++	    vma->vm_end - alloc->vm_start < PAGE_SIZE) {
++		alloc->vm_start = 0;
++		ret = -EINVAL;
++		failure_string = "no complete native page";
++		goto err_already_mapped;
++	}
++	alloc->buffer_size = min_t(unsigned long,
++				   (vma->vm_end - alloc->vm_start) & PAGE_MASK,
++				   SZ_4M);
+ 	mutex_unlock(&binder_alloc_mmap_lock);
+ 
+-	alloc->vm_start = vma->vm_start;
+-
+ 	alloc->pages = kvzalloc_objs(alloc->pages[0],
+ 				     alloc->buffer_size / PAGE_SIZE);

@@ -1,0 +1,24 @@
+--- a/fs/exec.c	2026-11-03 12:44:11.173066991 +0800
++++ b/fs/exec.c	2026-11-03 12:44:11.209065859 +0800
+@@ -1290,7 +1290,20 @@
+  */
+ static bool bprm_drops_page_size_policy(const struct linux_binprm *bprm)
+ {
+-	return (bprm->per_clear & PER_CLEAR_ON_SETID) || bprm->secureexec;
++	/*
++	 * HarmonyOS/Aurora port: SELinux sets PER_CLEAR_ON_SETID on every
++	 * domain transition, and every stock OHOS service exec transitions
++	 * away from the init domain. Treating that as a privilege gain would
++	 * force the native 16 KiB granule on every service exec, and then no
++	 * 4 KiB-aligned HarmonyOS binary could be loaded at all (execve dies
++	 * with EINVAL past the point of no return). Only AT_SECURE-class
++	 * gains keep dropping the user page-size preference: set-user-ID,
++	 * set-group-ID, gained file capabilities, and LSM secure-exec
++	 * transitions (e.g. SELinux with noatsecure denied) all set
++	 * bprm->secureexec. Personality-bit clearing alone no longer drops
++	 * the preference.
++	 */
++	return bprm->secureexec;
+ }
+ #endif
+ 

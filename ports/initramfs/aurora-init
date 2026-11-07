@@ -1,0 +1,92 @@
+#!/bin/sh
+# Runs as PID 1 after the freestanding launcher selects 4 KiB process pages.
+# No Debian userspace is started; the final exec is the original Harmony init.
+export PATH=/bin:/sbin
+export HOME=/
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /dev/pts /run /tmp /newroot
+mount -t devpts devpts /dev/pts
+mount -t tmpfs -o mode=0755 tmpfs /run
+mount -t tmpfs -o mode=1777 tmpfs /tmp
+
+rescue() {
+    echo "AURORA_HMOS_BOOT_FAILURE: $*" >/dev/console
+    if mount | grep -q ' /newroot '; then
+        mkdir -p /newroot/data/boot/aurora
+        echo "$*" >/newroot/data/boot/aurora/last-failure.txt
+        sync
+    fi
+    exec sh </dev/console >/dev/console 2>&1
+}
+
+root_uuid=
+mode=boot
+for arg in $(cat /proc/cmdline); do
+    case "$arg" in
+        hmos.root_uuid=*) root_uuid=${arg#hmos.root_uuid=};;
+        hmos.mode=*) mode=${arg#hmos.mode=};;
+    esac
+done
+[ "$root_uuid" = de5b04b6-597d-4382-b6a3-9e04388ccd6d ] || rescue 'unexpected or missing Harmony root UUID'
+
+# These device-tree providers must initialize before USB storage/DCP clients.
+for module in pinctrl-apple-gpio gpio-shared-proxy spi-apple i2c-pasemi-platform \
+    spmi-apple-controller apple_nvmem_spmi macsmc gpio-macsmc sn201202x tps6598x \
+    phy-apple-atc dwc3-apple thunderbolt-apple onboard-usb-dev \
+    mux-apple-display-crossbar phy-apple-dptx typec_displayport; do
+    modprobe "$module" 2>/dev/null || true
+done
+
+root_device=
+attempt=0
+while [ "$attempt" -lt 45 ]; do
+    # Coldplug aliases include children that became available on earlier passes.
+    for alias in $(find /sys/devices -name modalias -type f 2>/dev/null); do
+        modprobe "$(cat "$alias")" 2>/dev/null || true
+    done
+    for dev in /dev/sd*[0-9] /dev/nvme*n*p[0-9] /dev/mmcblk*p[0-9] /dev/vd*[0-9]; do
+        [ -b "$dev" ] || continue
+        if blkid "$dev" | grep -q "UUID=\"$root_uuid\""; then
+            root_device=$dev
+            break
+        fi
+    done
+    [ -n "$root_device" ] && break
+    sleep 1
+    attempt=$((attempt + 1))
+done
+[ -n "$root_device" ] || rescue 'Harmony root block device not found'
+mount -t ext4 -o rw,noatime "$root_device" /newroot || rescue 'cannot mount Harmony root'
+[ -x /newroot/system/bin/init ] || rescue 'original Harmony init missing'
+[ "$(readlink /newroot/init)" = /system/bin/init ] || rescue 'unexpected root init link'
+mkdir -p /newroot/data/boot/aurora
+cat /proc/cmdline >/newroot/data/boot/aurora/last-cmdline.txt
+
+# binderfs replaces the removed static-node creation path in this kernel.
+mkdir -p /dev/binderfs
+mount -t binder binder /dev/binderfs || rescue 'binderfs mount failed'
+if [ -x /bin/binder-setup ]; then
+    binder-setup || rescue 'binder device creation failed'
+else
+    rescue 'binder device setup tool missing'
+fi
+chown 0:3020 /dev/access_token_id || rescue 'AccessToken device missing'
+chmod 0660 /dev/access_token_id
+
+if [ "$mode" = rescue ]; then
+    echo 'Harmony root mounted; original init has not been started.' >/dev/console
+    exec sh </dev/console >/dev/console 2>&1
+fi
+[ "$mode" = boot ] || rescue 'unknown boot mode'
+
+# Rootfs migration and hardware-service adjustment are separate deliverables.
+# This guard is removed by the actual configuration/ABI validation step only.
+[ -f /newroot/boot/aurora-migration/ready-for-init ] || rescue 'rootfs hardware/service adaptation is not yet qualified'
+mkdir -p /newroot/proc /newroot/sys /newroot/dev /newroot/run /newroot/tmp
+mount --move /proc /newroot/proc || rescue 'move proc failed'
+mount --move /sys /newroot/sys || rescue 'move sys failed'
+mount --move /run /newroot/run || rescue 'move run failed'
+mount --move /dev /newroot/dev || rescue 'move dev failed'
+exec switch_root /newroot /init

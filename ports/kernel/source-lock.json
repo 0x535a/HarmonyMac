@@ -1,0 +1,21 @@
+{
+  "linux_aurora": {
+    "repository": "https://github.com/omacom/linux-aurora",
+    "commit": "d13466ebb8b5f2e2af3d2c8359f4c96e711a5679"
+  },
+  "openharmony_kernel": {
+    "repository": "https://github.com/openharmony/kernel_linux_5.10",
+    "branch": "OpenHarmony-6.0-Release",
+    "commit": "4e38b39c0ca8cc8768061c5ba645c1b748c66d95",
+    "driver_license": "GPL-2.0",
+    "driver_paths": [
+      "drivers/accesstokenid/access_tokenid.c",
+      "drivers/accesstokenid/access_tokenid.h"
+    ],
+    "changes": [
+      "Explicit cred/uaccess includes",
+      "Local nwebspawn UID 3081 definition",
+      "Internal helper prototypes and static linkage for modern kernel warnings"
+    ]
+  }
+}

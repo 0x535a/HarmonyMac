@@ -1,0 +1,210 @@
+--- a/src/gallium/drivers/softpipe/sp_draw_arrays.c
++++ b/src/gallium/drivers/softpipe/sp_draw_arrays.c
+@@ -44,6 +44,152 @@
+ #include "sp_screen.h"
+ 
+ #include "draw/draw_context.h"
++
++/* Opt-in bounded snapshots of the real softpipe state. No wrapper objects,
++ * resource references or diagnostic worker threads are introduced. */
++#ifdef __linux__
++#include <stdio.h>
++#include <unistd.h>
++#include "util/os_time.h"
++#include "util/u_debug.h"
++#include "util/u_dump.h"
++#include "util/u_atomic.h"
++#include "tgsi/tgsi_dump.h"
++#include "tgsi/tgsi_parse.h"
++
++/* A bounded compact timeline complements the last 64 full snapshots. */
++static void
++sp_diag_timeline(const char *line)
++{
++   const char *dir = debug_get_option("SOFTPIPE_DRAW_DIAG_DIR", NULL);
++   if (!dir || dir[0] != '/' || strlen(dir) > 400)
++      return;
++   static int entries;
++   if (p_atomic_inc_return(&entries) > 80000)
++      return;
++   uint64_t ms = os_time_get_nano() / 1000000;
++   if (ms < debug_get_num_option("SOFTPIPE_DRAW_DIAG_START_MS", 0) ||
++       ms > debug_get_num_option("SOFTPIPE_DRAW_DIAG_END_MS", INT64_MAX))
++      return;
++   char path[512];
++   snprintf(path, sizeof(path), "%s/rs%u-timeline.tsv", dir, (unsigned)getpid());
++   FILE *f = fopen(path, "a");
++   if (f) {
++      fputs(line, f);
++      fclose(f);
++   }
++}
++
++void softpipe_draw_diag_flush(struct pipe_context *, unsigned, bool);
++
++void
++softpipe_draw_diag_flush(struct pipe_context *pipe, unsigned flags, bool done)
++{
++   if (!debug_get_option("SOFTPIPE_DRAW_DIAG_DIR", NULL))
++      return;
++   char line[200];
++   snprintf(line, sizeof(line), "%s\t%llu\t%p\t%u\n", done ? "FLUSH_END" : "FLUSH_BEGIN",
++            (unsigned long long)os_time_get_nano(), (void *)pipe, flags);
++   sp_diag_timeline(line);
++}
++
++static int sp_diag_slots[64];
++static unsigned sp_diag_sequence;
++
++static void
++sp_diag_shader(FILE *f, const char *name, const struct tgsi_token *tokens)
++{
++   unsigned count = tokens ? tgsi_num_tokens(tokens) : 0;
++   fprintf(f, "\n%s tokens=%u\n", name, count);
++   if (count && count <= 16384)
++      tgsi_dump_to_file(tokens, 0, f);
++   else if (count)
++      fprintf(f, "SHADER_DUMP_LIMIT\n");
++}
++
++static unsigned
++sp_diag_begin(struct softpipe_context *sp, const struct pipe_draw_info *info,
++              const struct pipe_draw_start_count_bias *draw, char *path, size_t size)
++{
++   const char *dir = debug_get_option("SOFTPIPE_DRAW_DIAG_DIR", NULL);
++   if (!dir || dir[0] != '/' || strlen(dir) > 400)
++      return UINT_MAX;
++   uint64_t ms = os_time_get_nano() / 1000000;
++   if (ms < debug_get_num_option("SOFTPIPE_DRAW_DIAG_START_MS", 0) ||
++       ms > debug_get_num_option("SOFTPIPE_DRAW_DIAG_END_MS", INT64_MAX))
++      return UINT_MAX;
++   unsigned sequence = p_atomic_inc_return(&sp_diag_sequence);
++   unsigned slot = sequence % ARRAY_SIZE(sp_diag_slots);
++   for (unsigned tried = 0; p_atomic_cmpxchg(&sp_diag_slots[slot], 0, 1); tried++) {
++      if (tried == ARRAY_SIZE(sp_diag_slots) - 1)
++         return UINT_MAX;
++      slot = (slot + 1) % ARRAY_SIZE(sp_diag_slots);
++   }
++   snprintf(path, size, "%s/rs%u-slot%02u.txt", dir, (unsigned)getpid(), slot);
++   FILE *f = fopen(path, "w");
++   if (!f) {
++      p_atomic_set(&sp_diag_slots[slot], 0);
++      return UINT_MAX;
++   }
++   fprintf(f, "SOFTPIPE_DRAW_BEGIN seq=%u slot=%u mono_ms=%llu context=%p\n",
++           sequence, slot, (unsigned long long)ms, (void *)sp);
++   util_dump_draw_info(f, info); fputc('\n', f);
++   util_dump_draw_start_count_bias(f, draw); fputc('\n', f);
++   util_dump_framebuffer_state(f, &sp->framebuffer); fputc('\n', f);
++   util_dump_viewport_state(f, &sp->viewports[0]); fputc('\n', f);
++   util_dump_scissor_state(f, &sp->cliprect[0]); fputc('\n', f);
++   if (sp->rasterizer) util_dump_rasterizer_state(f, sp->rasterizer);
++   fputc('\n', f);
++   for (unsigned i = 0; i < sp->num_vertex_buffers; i++) {
++      fprintf(f, "\nVB %u ", i);
++      util_dump_vertex_buffer(f, &sp->vertex_buffer[i]);
++   }
++   if (sp->velems) {
++      for (unsigned i = 0; i < sp->velems->count; i++) {
++         fprintf(f, "\nVE %u ", i);
++         util_dump_vertex_element(f, &sp->velems->velem[i]);
++      }
++   }
++   for (unsigned sh = 0; sh < MESA_SHADER_STAGES; sh++) {
++      for (unsigned i = 0; i < sp->num_sampler_views[sh]; i++) {
++         if (sp->sampler_views[sh][i]) {
++            fprintf(f, "\nSAMPLER_VIEW stage=%u slot=%u ", sh, i);
++            util_dump_sampler_view(f, sp->sampler_views[sh][i]);
++         }
++      }
++   }
++   sp_diag_shader(f, "VERTEX", sp->vs ? sp->vs->shader.tokens : NULL);
++   sp_diag_shader(f, "FRAGMENT", sp->fs_variant ? sp->fs_variant->tokens : NULL);
++   fprintf(f, "\nSTATE_END\n");
++   fclose(f);
++   char line[320];
++   snprintf(line, sizeof(line), "DRAW_BEGIN\t%llu\t%p\t%u\t%u\t%u\t%u\t%u\t%u\t%p\t%p\n",
++            (unsigned long long)os_time_get_nano(), (void *)sp, sequence, slot,
++            draw->count, info->instance_count, sp->framebuffer.width, sp->framebuffer.height,
++            (void *)sp->framebuffer.cbufs[0].texture,
++            (void *)sp->fs_variant);
++   sp_diag_timeline(line);
++   return slot;
++}
++
++static void
++sp_diag_end(unsigned slot, const char *path, uint64_t started)
++{
++   if (slot == UINT_MAX)
++      return;
++   uint64_t elapsed = os_time_get_nano() - started;
++   FILE *f = fopen(path, "a");
++   if (f) {
++      fprintf(f, "SOFTPIPE_DRAW_END driver_ns=%llu\n", (unsigned long long)elapsed);
++      fclose(f);
++   }
++   char line[160];
++   snprintf(line, sizeof(line), "DRAW_END\t%llu\t%u\t%llu\n",
++            (unsigned long long)os_time_get_nano(), slot, (unsigned long long)elapsed);
++   sp_diag_timeline(line);
++   p_atomic_set(&sp_diag_slots[slot], 0);
++}
++#endif
+ 
+ /**
+  * This function handles drawing indexed and non-indexed prims,
+@@ -92,6 +238,12 @@
+       softpipe_update_derived(sp, sp->reduced_api_prim);
+    }
+ 
++#ifdef __linux__
++   char diag_path[512];
++   unsigned diag_slot = sp_diag_begin(sp, info, draws, diag_path, sizeof(diag_path));
++   uint64_t diag_started = os_time_get_nano();
++#endif
++
+    /* Map vertex buffers */
+    for (i = 0; i < sp->num_vertex_buffers; i++) {
+       const void *buf = sp->vertex_buffer[i].is_user_buffer ?
+@@ -158,4 +310,7 @@
+ 
+    /* Note: leave drawing surfaces mapped */
+    sp->dirty_render_cache = true;
+-}
++#ifdef __linux__
++   sp_diag_end(diag_slot, diag_path, diag_started);
++#endif
++}
+--- a/src/gallium/drivers/softpipe/sp_flush.c
++++ b/src/gallium/drivers/softpipe/sp_flush.c
+@@ -43,6 +43,10 @@
+ #include "util/u_string.h"
+ 
+ 
++#ifdef __linux__
++extern void softpipe_draw_diag_flush(struct pipe_context *, unsigned, bool);
++#endif
++
+ void
+ softpipe_flush( struct pipe_context *pipe,
+                 unsigned flags,
+@@ -50,6 +54,9 @@
+ {
+    struct softpipe_context *softpipe = softpipe_context(pipe);
+    uint i;
++#ifdef __linux__
++   softpipe_draw_diag_flush(pipe, flags, false);
++#endif
+ 
+    draw_flush(softpipe->draw);
+ 
+@@ -92,6 +99,9 @@
+ 
+    if (fence)
+       *fence = (void*)(intptr_t)1;
++#ifdef __linux__
++   softpipe_draw_diag_flush(pipe, flags, true);
++#endif
+ }
+ 
+ void

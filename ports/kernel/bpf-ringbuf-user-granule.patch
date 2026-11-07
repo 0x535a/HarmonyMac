@@ -1,0 +1,79 @@
+--- a/kernel/bpf/ringbuf.c
++++ b/kernel/bpf/ringbuf.c
+@@ -272,9 +272,64 @@
+ 	return -ENOTSUPP;
+ }
+ 
++#ifdef CONFIG_MM_SUBPAGE
++/* The user ABI has two position pages followed by the double-mapped data.
++ * Keep native backing pages and kernel layout, but expose position pages in
++ * the caller's granule. Never map private metadata or native-page padding.
++ */
++static int ringbuf_map_mmap_subpage(struct bpf_map *map,
++                                  struct vm_area_struct *vma, bool user_producer)
++{
++	struct bpf_ringbuf_map *rb_map = container_of(map, struct bpf_ringbuf_map, map);
++	struct bpf_ringbuf *rb = rb_map->rb;
++	unsigned long granule = mm_page_size(vma->vm_mm);
++	unsigned long length = vma->vm_end - vma->vm_start;
++	unsigned long offset, addr = vma->vm_start;
++	unsigned long limit = 2 * granule + 2 * (unsigned long)map->max_entries;
++	unsigned long nr_pages = rb->nr_pages + (map->max_entries >> PAGE_SHIFT);
++
++	if (check_shl_overflow(vma->vm_pgoff, PAGE_SHIFT, &offset) ||
++	    check_add_overflow(offset, vma_subpage_offset(vma), &offset) ||
++	    offset > limit || length > limit - offset)
++		return -EINVAL;
++	if (vma->vm_flags & VM_WRITE) {
++		if (user_producer ? offset < granule : offset != 0 || length != granule)
++			return -EPERM;
++	}
++	vm_flags_set(vma, VM_DONTEXPAND | VM_DONTDUMP);
++	while (length) {
++		unsigned long backing_offset, part;
++		int err;
++
++		if (offset < granule) {
++			backing_offset = (RINGBUF_PGOFF << PAGE_SHIFT) + offset;
++			part = min(length, granule - offset);
++		} else if (offset < 2 * granule) {
++			backing_offset = ((RINGBUF_PGOFF + 1) << PAGE_SHIFT) + offset - granule;
++			part = min(length, 2 * granule - offset);
++		} else {
++			backing_offset = (RINGBUF_NR_META_PAGES << PAGE_SHIFT) + offset - 2 * granule;
++			part = length;
++		}
++		err = vm_insert_pages_range(vma, addr, rb->pages, nr_pages, backing_offset, part);
++		if (err)
++			return err;
++		addr += part;
++		offset += part;
++		length -= part;
++	}
++	return 0;
++}
++#endif
++
+ static int ringbuf_map_mmap_kern(struct bpf_map *map, struct vm_area_struct *vma)
+ {
+ 	struct bpf_ringbuf_map *rb_map;
++
++#ifdef CONFIG_MM_SUBPAGE
++	if (mm_page_size(vma->vm_mm) < PAGE_SIZE)
++		return ringbuf_map_mmap_subpage(map, vma, false);
++#endif
+ 
+ 	rb_map = container_of(map, struct bpf_ringbuf_map, map);
+ 
+@@ -291,6 +346,11 @@
+ static int ringbuf_map_mmap_user(struct bpf_map *map, struct vm_area_struct *vma)
+ {
+ 	struct bpf_ringbuf_map *rb_map;
++
++#ifdef CONFIG_MM_SUBPAGE
++	if (mm_page_size(vma->vm_mm) < PAGE_SIZE)
++		return ringbuf_map_mmap_subpage(map, vma, true);
++#endif
+ 
+ 	rb_map = container_of(map, struct bpf_ringbuf_map, map);
+ 

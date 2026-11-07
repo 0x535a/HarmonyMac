@@ -1,0 +1,12 @@
+--- a/src/util/perf/cpu_trace.h
++++ b/src/util/perf/cpu_trace.h
+@@ -95,7 +95,8 @@
+ 
+ #endif /* HAVE_SYSPROF */
+ 
+-#if __has_attribute(cleanup) && __has_attribute(unused)
++#if __has_attribute(cleanup) && __has_attribute(unused) && \
++   (defined(HAVE_PERFETTO) || defined(HAVE_GPUVIS) || defined(HAVE_SYSPROF))
+ 
+ #include <stdarg.h>
+ #include <stdio.h>
