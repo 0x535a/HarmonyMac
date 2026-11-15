@@ -13,3 +13,4 @@ jobs:
         with:
           persist-credentials: false
       - run: python3 scripts/check-repository.py
+      - run: python3 scripts/test-oobe-tools.py

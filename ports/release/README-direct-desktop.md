@@ -16,3 +16,5 @@ rootfs.qcow2是独立基础盘；启动时创建runtime/system.qcow2持久层。
 已知限制：桌面壁纸黑、部分图标不完整；图库停在首次使用页面，浏览器只验证窗口；文件管理器退出。OOBE通过启动脚本在116秒后调用原aa force-stop结束，启动期间可能短暂出现。商业socIdCert/TEE失败仍保留，不视为激活成功。Tablet绝对坐标未经验证，使用相对鼠标。
 
 本包仅在虚拟硬件运行，内核test7、OHOS ABI llvmpipe。未访问U393，未修改EFI/m1n1/GRUB；Apple内屏、GPU及内置输入需独立原生验证。
+
+结束向导的方法、配套源码及历史离线处理的限制见 [OOBE 开发桌面说明](../../docs/oobe-development-desktop.md)。本文件的 116 秒等待描述对应既有包，不代表所有镜像的启动时序。

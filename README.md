@@ -29,6 +29,7 @@ HarmonyOS 镜像通过[百度网盘](https://pan.baidu.com/s/1DmrbZjC8IqnzeOEG4j
 
 - [构建环境与流程](docs/build.md)：依赖、固定版本、脚本入口及复现缺口。
 - [运行与原生启动说明](docs/running.md)：预览包使用方式和原生部署边界。
+- [跳过 OOBE 进入开发桌面](docs/oobe-development-desktop.md)：原装停止接口、离线初始化标志、代码和回退。
 - [第三方来源与许可](docs/third-party.md)：Aurora、OpenHarmony、Mesa 等上游材料。
 - [贡献与仓库检查](CONTRIBUTING.md)。
 
