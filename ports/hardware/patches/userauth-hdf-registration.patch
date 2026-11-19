@@ -1,0 +1,33 @@
+--- a/service/user_auth_interface_driver.cpp
++++ b/service/user_auth_interface_driver.cpp
+@@ -104,8 +104,19 @@
+         return HDF_FAILURE;
+     }
+ 
+-    hdfUserAuthInterfaceHost->stub = OHOS::HDI::ObjectCollector::GetInstance().GetOrNewObject(
+-        serviceImpl, IUserAuthInterface::GetDescriptor());
++    // Explicitly register in the same collector used by this dynamically
++    // loaded driver. Do not depend on cross-DSO inline global initialization.
++    const auto &descriptor = IUserAuthInterface::GetDescriptor();
++    auto &collector = OHOS::HDI::ObjectCollector::GetInstance();
++    bool registered = collector.ConstructorRegister(descriptor,
++        [](const OHOS::sptr<OHOS::HDI::HdiBase> &iface) -> OHOS::sptr<OHOS::IRemoteObject> {
++            if (iface == nullptr) { return nullptr; }
++            return new (std::nothrow) OHOS::HDI::UserAuth::V4_0::UserAuthInterfaceStub(
++                static_cast<IUserAuthInterface *>(iface.GetRefPtr()));
++        });
++    fprintf(stderr, "AURORA_USERAUTH_BIND descriptor_units=%zu registered=%d constructor_bytes=%zu\n",
++        descriptor.size(), registered, sizeof(OHOS::HDI::ObjectCollector::Constructor));
++    hdfUserAuthInterfaceHost->stub = collector.GetOrNewObject(serviceImpl, descriptor);
+     if (hdfUserAuthInterfaceHost->stub == nullptr) {
+         IAM_LOGE("failed to get stub object");
+         delete hdfUserAuthInterfaceHost;
+@@ -130,6 +141,8 @@
+         return;
+     }
+     delete hdfUserAuthInterfaceHost;
++    deviceObject->service = nullptr;
++    OHOS::HDI::ObjectCollector::GetInstance().ConstructorUnRegister(IUserAuthInterface::GetDescriptor());
+ }
+ 
+ struct HdfDriverEntry g_userAuthInterfaceDriverEntry = {

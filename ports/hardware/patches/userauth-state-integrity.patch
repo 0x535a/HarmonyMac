@@ -1,0 +1,55 @@
+--- a/database/src/idm_file_manager.c
++++ b/database/src/idm_file_manager.c
+@@ -338,6 +338,10 @@
+         LOG_ERROR("read version failed");
+         return false;
+     }
++    if (version != VERSION) {
++        LOG_ERROR("unsupported credential state version");
++        return false;
++    }
+     result = StreamRead(parcel, &index, &userNum, sizeof(uint32_t));
+     if (result != RESULT_SUCCESS) {
+         LOG_ERROR("read userNum failed");
+@@ -366,7 +370,7 @@
+             return false;
+         }
+     }
+-    return true;
++    return index == parcel->contentSize;
+ }
+ 
+ LinkedList *LoadFileInfo(void)
+--- a/database/src/idm_database.c
++++ b/database/src/idm_database.c
+@@ -81,6 +81,8 @@
+     ret = LoadGlobalConfigInfo(g_globalConfigArray, MAX_GLOBAL_CONFIG_NUM, &g_globalConfigInfoNum);
+     if (ret != RESULT_SUCCESS) {
+         LOG_ERROR("load global config info failed");
++        DestroyUserInfoList();
++        return ret;
+     }
+     LOG_INFO("InitUserInfoList end");
+     return RESULT_SUCCESS;
+--- a/database/src/global_config_file_manager.c
++++ b/database/src/global_config_file_manager.c
+@@ -210,6 +210,10 @@
+         LOG_ERROR("read version failed");
+         return RESULT_GENERAL_ERROR;
+     }
++    if (version != VERSION) {
++        LOG_ERROR("unsupported global config version");
++        return RESULT_GENERAL_ERROR;
++    }
+     result = StreamRead(parcel, &index, configInfoNum, sizeof(uint32_t));
+     if (result != RESULT_SUCCESS || (*configInfoNum) > maxNum) {
+         LOG_ERROR("read configInfoNum failed");
+@@ -221,7 +225,7 @@
+             return RESULT_GENERAL_ERROR;
+         }
+     }
+-    return RESULT_SUCCESS;
++    return index == parcel->contentSize ? RESULT_SUCCESS : RESULT_GENERAL_ERROR;
+ }
+ 
+ ResultCode LoadGlobalConfigInfo(GlobalConfigInfo *globalConfigArray, uint32_t len, uint32_t *configInfoNum)

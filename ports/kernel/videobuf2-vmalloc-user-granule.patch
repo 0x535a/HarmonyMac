@@ -1,0 +1,57 @@
+--- a/drivers/media/common/videobuf2/videobuf2-vmalloc.c
++++ b/drivers/media/common/videobuf2/videobuf2-vmalloc.c
+@@ -167,6 +167,39 @@
+ 	return refcount_read(&buf->refcount);
+ }
+ 
++#ifdef CONFIG_MM_SUBPAGE
++/* A vb2 plane has native-page backing, but its user mapping may end within
++ * the last backing page. Map every user leaf of the requested VMA.
++ */
++static int vb2_vmalloc_mmap_subpage(struct vb2_vmalloc_buf *buf,
++				   struct vm_area_struct *vma)
++{
++	unsigned long length = vma->vm_end - vma->vm_start;
++	unsigned long nr_pages = DIV_ROUND_UP(length, PAGE_SIZE);
++	struct page **pages;
++	unsigned long i;
++	int ret = -EINVAL;
++
++	if (!length || length > PAGE_ALIGN(buf->size) ||
++	    !PAGE_ALIGNED((unsigned long)buf->vaddr))
++		return -EINVAL;
++
++	pages = kvmalloc_array(nr_pages, sizeof(*pages), GFP_KERNEL);
++	if (!pages)
++		return -ENOMEM;
++
++	for (i = 0; i < nr_pages; i++) {
++		pages[i] = vmalloc_to_page(buf->vaddr + i * PAGE_SIZE);
++		if (!pages[i])
++			goto out;
++	}
++	ret = vm_insert_pages_range(vma, vma->vm_start, pages, nr_pages, 0, length);
++out:
++	kvfree(pages);
++	return ret;
++}
++#endif
++
+ static int vb2_vmalloc_mmap(void *buf_priv, struct vm_area_struct *vma)
+ {
+ 	struct vb2_vmalloc_buf *buf = buf_priv;
+@@ -177,7 +210,13 @@
+ 		return -EINVAL;
+ 	}
+ 
+-	ret = remap_vmalloc_range(vma, buf->vaddr, 0);
++#ifdef CONFIG_MM_SUBPAGE
++	if (mm_page_size(vma->vm_mm) < PAGE_SIZE) {
++		ret = vb2_vmalloc_mmap_subpage(buf, vma);
++		vm_flags_set(vma, VM_DONTDUMP);
++	} else
++#endif
++		ret = remap_vmalloc_range(vma, buf->vaddr, 0);
+ 	if (ret) {
+ 		pr_err("Remapping vmalloc memory, error: %d\n", ret);
+ 		return ret;

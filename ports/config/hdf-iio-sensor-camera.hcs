@@ -1,0 +1,24 @@
+// Append the stock local camera HDI wrapper at host index 10.
+#include "hdf-iio-sensor.hcs"
+
+root {
+    device_info {
+        camera_host {
+            hostName = "camera_host";
+            priority = 50;
+            uid = "camera_host";
+            gid = ["camera_host", "dev_camera", "dev_dma_heap", "graphics"];
+            camera_device {
+                device0 {
+                    policy = 2;
+                    preload = 0;
+                    priority = 100;
+                    moduleName = "libcamera_host_service_1.0.z.so";
+                    serviceName = "camera_service_usb";
+                    permission = 0x1b4;
+                    deviceMatchAttr = "";
+                }
+            }
+        }
+    }
+}

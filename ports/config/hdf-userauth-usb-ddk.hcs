@@ -1,0 +1,16 @@
+// Preserve hosts 0..8 and all prior USB devices; restore stock DDK in host 4.
+#include "hdf-wireless-userauth.hcs"
+root {
+    device_info {
+        usb {
+            ddk_device {
+                device0 {
+                    policy = 2; priority = 100;
+                    moduleName = "libusb_ddk_driver.z.so";
+                    serviceName = "usb_ddk_service";
+                    preload = 0; permission = 0x1b4; deviceMatchAttr = "";
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,21 @@
+// Preserve existing host indices 0..6; Linux HCI host is index 7.
+#include "hdf-graphics-audio-battery-usb-wifi.hcs"
+root {
+    device_info {
+        bluetooth {
+            hostName = "blue_host";
+            priority = 50;
+            uid = "blue_host";
+            gid = ["blue_host", "oeminfo_nvme_server"];
+            caps = ["SYS_NICE", "NET_ADMIN", "NET_RAW"];
+            bluetooth_hci_device {
+                device0 {
+                    policy = 2; priority = 100; preload = 0; permission = 0x1b4;
+                    moduleName = "libbluetooth_hci_hdi_driver.z.so";
+                    serviceName = "hci_interface_service";
+                    deviceMatchAttr = "";
+                }
+            }
+        }
+    }
+}

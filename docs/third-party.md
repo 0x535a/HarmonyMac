@@ -11,10 +11,13 @@
 | HDF 加载协议参考 | [OpenHarmony drivers_peripheral](https://github.com/openharmony/drivers_peripheral)，`8cd47d4bb09a4d160e8b713b2fbccf8d41e2025f` | 参考上游协议；目标库由外部镜像提供 |
 | DFX dump catcher 声明 | `tests/include/dfx_dump_catcher.h`，OpenHarmony DFX 接口 | 保留 Apache-2.0 与 Huawei Device 版权；原记录未固定独立来源提交 |
 | Mesa 补丁 | 基线 `7c86130d26cecd50c7af1ac01ff3fa1705d58045` | 按对应 Mesa 文件原许可使用；完整版权材料由外部源码树提供 |
+| Asahi 无线固件转换模块 | [AsahiLinux/asahi-installer](https://github.com/AsahiLinux/asahi-installer)，`e93743d52178b3e26e428fa05174ef549abf30cb` | MIT，保留原始通知、[许可](../ports/firmware/asahi_vendorfw/LICENSE)及[文件哈希](../ports/firmware/asahi_vendorfw/SOURCE.json) |
+| kmod 与 FUSE 辅助实现 | `ports/hardware/` | 保留文件的 [LGPL-2.1-or-later 许可](../LICENSES/LGPL-2.1-or-later.txt)。kmod 34.2 是外部构建输入 |
+| UserAuth 软件后端 | [OpenHarmony drivers_peripheral](https://github.com/openharmony/drivers_peripheral)，`8cd47d4bb09a4d160e8b713b2fbccf8d41e2025f`，`user_auth/hdi_service` | 保留 Apache-2.0。仓库收录本项目的文件存储实现和对上游的补丁 |
 | LLVM、libdrm、zlib、expat、BusyBox | 外部构建输入 | 未捆绑源码或二进制；分发构建产物时另行保留其许可与对应源码要求 |
 
 历史记录中 `DisplayComposerType.idl` SHA256 为 `8be06dca7cba51335a31d31c8f979e20ffa3dd8149b7ce181667f5bcb3dc41a0`；drivers_peripheral codeload tar SHA256 为 `372784383662527e8beea176a1290252efb3c50188e761db8a0e3fd64c2e89f3`。
 
-最初开发材料包含 L410 适配源码与 GPL-3.0 许可文本，本仓库未整套收录。HarmonyOS 原装服务、系统库、SDK、固件、镜像和商业服务属于外部材料，本仓库 GPL 不授予其再分发权。
+最初开发材料包含 L410 适配源码与 GPL-3.0 许可文本，本仓库选用了 GPL-3.0-only 的 [XPower 电池兼容源码](../ports/hardware/xpower_battery_v303.c)。HarmonyOS 原装服务、系统库、SDK、固件、镜像和商业服务属于外部材料，本仓库 GPL 不授予其再分发权。
 
 许可全文：[GPL-3.0-only](../LICENSE)、[GPL-2.0](../LICENSES/GPL-2.0-only.txt)、[Apache-2.0](../LICENSES/Apache-2.0.txt)。

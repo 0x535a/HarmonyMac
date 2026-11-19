@@ -1,0 +1,20 @@
+// Preserve hosts 0..7 and restore the retained stock UserAuth HDI as host 8.
+#include "hdf-graphics-audio-battery-usb-wireless.hcs"
+root {
+    device_info {
+        user_auth {
+            hostName = "user_auth_host";
+            priority = 50;
+            uid = "user_auth_host";
+            gid = ["user_auth_host"];
+            user_auth_device {
+                device0 {
+                    policy = 2; priority = 200; preload = 0; permission = 0x1b4;
+                    moduleName = "libuser_auth_driver.z.so";
+                    serviceName = "user_auth_interface_service";
+                    deviceMatchAttr = "";
+                }
+            }
+        }
+    }
+}

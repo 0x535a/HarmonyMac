@@ -1,0 +1,20 @@
+// Restore the stock Sensor HDI wrapper in appended host9, backed by real IIO.
+#include "hdf-userauth-usb-ddk-thermal.hcs"
+root {
+    device_info {
+        sensor {
+            hostName = "sensor_host";
+            priority = 50;
+            uid = "sensor_host";
+            gid = ["sensor_host"];
+            sensor_device {
+                device0 {
+                    policy = 2; priority = 100;
+                    moduleName = "libsensor_driver.z.so";
+                    serviceName = "sensor_interface_service";
+                    preload = 0; permission = 0x1b4; deviceMatchAttr = "";
+                }
+            }
+        }
+    }
+}

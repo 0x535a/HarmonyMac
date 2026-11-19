@@ -1,0 +1,44 @@
+// Existing host indices 0..4 stay unchanged; original Wi-Fi/WPA hosts are 5/6.
+#include "hdf-graphics-audio-battery-usb.hcs"
+root {
+    device_info {
+        wifi {
+            hostName = "wifi_host";
+            priority = 50;
+            uid = "wifi_host";
+            gid = ["wifi_host", "wifi_group"];
+            caps = ["DAC_OVERRIDE", "DAC_READ_SEARCH", "NET_ADMIN", "NET_RAW"];
+            wifi_c_device {
+                device0 {
+                    policy = 2; priority = 100; preload = 0; permission = 0x1b4;
+                    moduleName = "libwifi_hdi_c_device.z.so";
+                    serviceName = "wlan_interface_service";
+                    deviceMatchAttr = "";
+                }
+            }
+            wifi_chip_device {
+                device0 {
+                    policy = 2; priority = 100; preload = 0; permission = 0x1b4;
+                    moduleName = "libchip_hdi_driver.z.so";
+                    serviceName = "chip_interface_service";
+                    deviceMatchAttr = "";
+                }
+            }
+        }
+        wpa {
+            hostName = "wpa_host";
+            priority = 50;
+            uid = "wifi";
+            gid = ["wifi", "wifi_group", "wifi_host"];
+            caps = ["DAC_OVERRIDE", "DAC_READ_SEARCH", "NET_ADMIN", "NET_RAW"];
+            wpa_device {
+                device0 {
+                    policy = 2; priority = 100; preload = 2; permission = 0x1b4;
+                    moduleName = "libwpa_hdi_c_device.z.so";
+                    serviceName = "wpa_interface_service";
+                    deviceMatchAttr = "";
+                }
+            }
+        }
+    }
+}

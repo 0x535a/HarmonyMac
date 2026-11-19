@@ -1,0 +1,50 @@
+// Keep existing host IDs 0..3; the local USB host is index 4.
+#include "hdf-graphics-audio-battery.hcs"
+
+root {
+    device_info {
+        usb {
+            hostName = "usb_host";
+            priority = 50;
+            uid = "usb_host";
+            gid = ["usb_host"];
+            caps = ["DAC_OVERRIDE"];
+            usb_pnp_manager_device {
+                device0 {
+                    policy = 2; priority = 70;
+                    moduleName = "libusb_pnp_manager.z.so";
+                    serviceName = "usb_pnp_manager";
+                    deviceMatchAttr = "usb_pnp_manager_driver";
+                    preload = 0; permission = 0x1b4;
+                }
+            }
+            usb_device {
+                device0 {
+                    policy = 2; priority = 100;
+                    moduleName = "libusb_device_driver.z.so";
+                    serviceName = "usb_device_interface_service";
+                    deviceMatchAttr = "usb_device_interface_driver";
+                    preload = 0; permission = 0x1b4;
+                }
+                device1 {
+                    policy = 2; priority = 100;
+                    moduleName = "libusb_port_driver.z.so";
+                    serviceName = "usb_port_interface_service";
+                    deviceMatchAttr = "usb_device_interface_driver";
+                    preload = 0; permission = 0x1b4;
+                }
+            }
+        }
+    }
+    // Original service properties. Absent gadget/dual-role hardware must report
+    // its real absence; these are not fabricated sysfs nodes or port states.
+    usb_device_config {
+        match_attr = "usb_device_interface_driver";
+        port_file_path = "/sys/class/dual_role_pd/";
+    }
+    usb_pnp_manager_config {
+        match_attr = "usb_pnp_manager_driver";
+        gadget_state_path = "/sys/class/gadget_usb/gadget0/state";
+        gadget_uevent_path = "/devices/virtual/gadget_usb/gadget0";
+    }
+}

@@ -1,0 +1,17 @@
+// Add real, read-only Linux temperature telemetry to the existing power host.
+// Preserve all host indices, credentials, battery and other device services.
+#include "hdf-userauth-usb-ddk.hcs"
+root {
+    device_info {
+        power {
+            thermal_readonly_device {
+                device0 {
+                    policy = 2; priority = 120;
+                    moduleName = "libaurora_thermal_driver.z.so";
+                    serviceName = "thermal_interface_service";
+                    preload = 0; permission = 0x1b4; deviceMatchAttr = "";
+                }
+            }
+        }
+    }
+}

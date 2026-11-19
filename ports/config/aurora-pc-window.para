@@ -1,0 +1,2 @@
+# PC window mode for the Aurora desktop port. Not a device certificate or activation flag.
+const.window.multiWindowUIType=FreeFormMultiWindow
