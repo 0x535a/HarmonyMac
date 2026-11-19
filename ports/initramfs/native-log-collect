@@ -17,6 +17,14 @@ mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null || true
     echo '=== MODULE LOAD LOG ==='; cat /run/hmos-native-module-load.log 2>/dev/null
     echo '=== DEFERRED PROBES ==='; cat /sys/kernel/debug/devices_deferred 2>/dev/null
     echo '=== USB DEVICES ==='; ls -l /sys/bus/usb/devices/ 2>/dev/null
+    echo '=== POWER SUPPLIES ==='
+    for supply in /sys/class/power_supply/*; do
+        test -d "$supply" || continue
+        echo "SUPPLY=$supply"
+        for attr in type scope present capacity status online voltage_now current_now temp; do
+            if test -f "$supply/$attr"; then echo "ATTR=$attr"; cat "$supply/$attr"; fi
+        done
+    done
     for d in /sys/class/usb_role/* /sys/class/typec/* /sys/bus/spmi/devices/* /sys/bus/usb/devices/* /sys/bus/platform/devices/*.cio /sys/bus/platform/devices/*.usb /sys/bus/platform/devices/*.phy; do
         test -e "$d" || continue
         echo "=== DEVICE $d ==="
@@ -35,6 +43,7 @@ mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null || true
 if grep -q ' /newroot ext4 rw' /proc/mounts; then
     target=/newroot/data/boot/aurora/native-diagnostics/$boot_id
     mkdir -p "$target"
+    echo "$boot_id" >/newroot/data/boot/aurora/native-diagnostics/last-boot-id
     busybox cp "$logdir/"* "$target/" && sync && echo "HMOS_NATIVE_LOG_SAVED=$target"
     exit
 fi
@@ -47,6 +56,7 @@ for dev in /dev/sd*[0-9] /dev/nvme*n*p[0-9] /dev/vd*[0-9]; do
         if mount -t ext4 -o rw,nosuid,nodev,noexec "$dev" /run/hmos-log-target; then
             target=/run/hmos-log-target/data/boot/aurora/native-diagnostics/$boot_id
             mkdir -p "$target"
+            echo "$boot_id" >/run/hmos-log-target/data/boot/aurora/native-diagnostics/last-boot-id
             busybox cp "$logdir/"* "$target/" && sync
             busybox umount /run/hmos-log-target
             echo "HMOS_NATIVE_LOG_SAVED_U393=$boot_id"
@@ -59,9 +69,10 @@ for dev in /dev/nvme*n*p[0-9]; do
     test -b "$dev" || continue
     test "$(/bin/fat-uuid "$dev")" = 7892-13ee || continue
     if mount -t vfat -o rw,nosuid,nodev,noexec "$dev" /run/hmos-log-target; then
-        if test -f /run/hmos-log-target/harmonyos/7.2.11-aurora-hmos-j514s-test7/Image; then
+        if test -f /run/hmos-log-target/harmonyos/7.2.11-aurora-hmos-j514s-test7/Image || grep -q '# BEGIN U393-SWR-20261117-r1' /run/hmos-log-target/EFI/BOOT/grub.cfg; then
             target=/run/hmos-log-target/harmonyos/diagnostics/$boot_id
             mkdir -p "$target"
+            echo "$boot_id" >/run/hmos-log-target/harmonyos/diagnostics/last-boot-id
             busybox cp "$logdir/"* "$target/" && sync
             echo "HMOS_NATIVE_LOG_SAVED_ESP=$boot_id"
         fi

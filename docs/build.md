@@ -50,7 +50,9 @@ llvmpipe 是独立构建前缀，使用 `build-ohos-llvm.sh` 和 `build-ohos-llv
 
 已收录历史构建的 [test7.config](../ports/kernel/test7.config)，可作为同一基线的配置参考；补丁应用驱动脚本和模块安装交接流程尚未补齐。`kernel/ashmem/` 为独立模块，必须针对同一内核构建。
 
-`build-native-initramfs.py --help` 列出匹配 modules、静态 bootstrap、固件、UUID 读取工具与输出目录等输入。原生构建器固定 test7；模块缺失或 vermagic 不匹配会拒绝构建。
+`build-native-initramfs.py --help` 列出匹配 modules、静态 bootstrap、固件、UUID 读取工具与输出目录等输入。原生构建器默认 test7，可用 `--release 7.2.11-aurora-hmos-j514s-test8` 选择匹配的 test8 元组。模块缺失或 vermagic 不匹配会拒绝构建。新 initramfs 在正常启动前加载 macsmc-power 并等待有效电池读数，保留低电量保护和只读救援。
+
+[test8 构建脚本](../ports/tools/build-kernel8-legacy.sh) 从保留完整补丁与已核对配置的 test7 源码树构建独立元组，增加 legacy IPv4/IPv6 XTables 和 PCIe 热插拔。输入树的 `.config` 应与仓库的 test7.config 一致。构建后将 Image、DTB、modules、ashmem 和 initramfs 配套使用。
 
 ## 分项验证
 

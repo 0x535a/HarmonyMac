@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a native test7 initramfs from matched modules, static tools and audited firmware. No devices accessed."""
+"""Build a native initramfs from an explicit matched module tuple. No devices accessed."""
 import argparse, gzip, hashlib, io, json, os, re, shutil, stat, tarfile
 from pathlib import Path
 p=argparse.ArgumentParser(description=__doc__)
@@ -10,8 +10,10 @@ p.add_argument('--ext4-uuid',type=Path,required=True,help='Static ext4 UUID read
 p.add_argument('--kernel-log',type=Path,required=True)
 p.add_argument('--fat-uuid',type=Path,required=True)
 p.add_argument('--output',type=Path,required=True)
+p.add_argument('--release',default='7.2.11-aurora-hmos-j514s-test7')
 a=p.parse_args()
-release='7.2.11-aurora-hmos-j514s-test7'
+release=a.release
+assert re.fullmatch(r'7\.2\.11-aurora-hmos-j514s-test[0-9]+',release)
 source=a.modules/'lib/modules'/release
 assert source.is_dir() and not a.output.exists()
 assert not a.output.resolve().is_relative_to('/dev')
@@ -20,7 +22,7 @@ for line in (source/'modules.dep').read_text().splitlines():
     name, values=line.split(':',1);deps[name]=values.split()
 byname={Path(k).stem.replace('-','_'):k for k in deps}
 builtins={Path(x).stem.replace('-','_') for x in (source/'modules.builtin').read_text().splitlines()}
-seed='pinctrl-apple-gpio gpio-shared-proxy spi-apple i2c-pasemi-platform spmi-apple-controller apple_nvmem_spmi macsmc gpio-macsmc sn201202x tps6598x phy-apple-atc dwc3-apple thunderbolt_apple onboard_usb_dev mux-apple-display-crossbar phy-apple-dptx typec_displayport apple-sart nvme-apple apple-rtkit-helper apple-sio apple-dockchannel dockchannel-hid spi-hid-apple-of hid-apple hid-magicmouse hid-multitouch macsmc-input apple-pmp appledrm'.split()
+seed='pinctrl-apple-gpio gpio-shared-proxy spi-apple i2c-pasemi-platform spmi-apple-controller apple_nvmem_spmi macsmc macsmc-power gpio-macsmc sn201202x tps6598x phy-apple-atc dwc3-apple thunderbolt_apple onboard_usb_dev mux-apple-display-crossbar phy-apple-dptx typec_displayport apple-sart nvme-apple apple-rtkit-helper apple-sio apple-dockchannel dockchannel-hid spi-hid-apple-of hid-apple hid-magicmouse hid-multitouch macsmc-input apple-pmp appledrm'.split()
 soft={}
 for line in (source/'modules.softdep').read_text().splitlines():
     bits=line.split()
@@ -53,8 +55,12 @@ for name,src in [('kernel-log',a.kernel_log),('fat-uuid',a.fat_uuid)]:
     shutil.copyfile(src,root/'bin'/name);(root/'bin'/name).chmod(0o755)
 shutil.copyfile(Path(__file__).resolve().parents[1]/'initramfs/native-log-collect',root/'bin/native-log-collect')
 (root/'bin/native-log-collect').chmod(0o755)
+shutil.copyfile(Path(__file__).resolve().parents[1]/'initramfs/native-battery-ready',root/'bin/native-battery-ready')
+(root/'bin/native-battery-ready').chmod(0o755)
 (root/'bin/dmesg').unlink();(root/'bin/dmesg').symlink_to('kernel-log')
-shutil.copyfile(Path(__file__).resolve().parents[1]/'initramfs/native-stage-init',root/'aurora-init');(root/'aurora-init').chmod(0o755)
+native_script=(Path(__file__).resolve().parents[1]/'initramfs/native-stage-init').read_text()
+native_script=native_script.replace('7.2.11-aurora-hmos-j514s-test7',release).replace('native-ready-test7','native-ready-'+release.rsplit('-',1)[-1])
+(root/'aurora-init').write_text(native_script);(root/'aurora-init').chmod(0o755)
 dest=root/'lib/modules'/release;dest.mkdir(parents=True)
 for path in sorted(selected):
     f=source/path
@@ -101,7 +107,7 @@ for f in [root]+sorted(root.rglob('*')):
     name='.' if f==root else './'+str(f.relative_to(root));st=f.lstat()
     if f.is_symlink():mode=stat.S_IFLNK|0o777;data=os.readlink(f).encode()
     elif f.is_dir():mode=stat.S_IFDIR|0o755;data=b''
-    else:mode=stat.S_IFREG|(0o755 if str(f.relative_to(root)) in ['init','aurora-init','bin/busybox','bin/binder-setup','bin/input-device-permissions','bin/ext4-uuid','bin/modprobe','bin/kernel-log','bin/fat-uuid','bin/native-log-collect'] else 0o644);data=f.read_bytes()
+    else:mode=stat.S_IFREG|(0o755 if str(f.relative_to(root)) in ['init','aurora-init','bin/busybox','bin/binder-setup','bin/input-device-permissions','bin/ext4-uuid','bin/modprobe','bin/kernel-log','bin/fat-uuid','bin/native-log-collect','bin/native-battery-ready'] else 0o644);data=f.read_bytes()
     nameb=name.encode()+b'\0';fields=[ino,mode,0,0,1,0,len(data),0,0,0,0,len(nameb),0]
     archive.write(b'070701'+b''.join(f'{v:08x}'.encode() for v in fields)+nameb)
     archive.write(b'\0'*(-archive.tell()%4));archive.write(data);archive.write(b'\0'*(-archive.tell()%4));ino+=1

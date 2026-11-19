@@ -41,7 +41,7 @@ cat /proc/version
 # Use modules from this initramfs only, matched to this exact kernel release.
 test "$(uname -r)" = 7.2.11-aurora-hmos-j514s-test7 || rescue kernel-module-version-mismatch
 for module in pinctrl-apple-gpio gpio-shared-proxy spi-apple i2c-pasemi-platform \
-    spmi-apple-controller apple_nvmem_spmi macsmc gpio-macsmc sn201202x tps6598x \
+    spmi-apple-controller apple_nvmem_spmi macsmc macsmc-power gpio-macsmc sn201202x tps6598x \
     phy-apple-atc dwc3-apple thunderbolt_apple onboard_usb_dev \
     mux-apple-display-crossbar phy-apple-dptx typec_displayport \
     apple-sart nvme-apple apple-rtkit-helper apple-sio apple-dockchannel \
@@ -80,6 +80,10 @@ if test "$mode" = rescue; then
     echo HMOS_NATIVE_READONLY_RESCUE_READY
     rescue requested-readonly-rescue
 fi
+# The HDI enumerates battery paths once. A later userspace module coldplug can
+# arrive after it and leave empty paths/zero callbacks that trigger LowCapacity.
+modprobe macsmc-power >>/run/hmos-native-module-load.log 2>&1 || rescue native-battery-driver-failed
+/bin/native-battery-ready || rescue native-battery-not-ready
 # This file is installed only by the separately audited native root adaptation.
 test -f /newroot/boot/aurora-migration/native-ready-test7 || rescue native-root-not-prepared
 test ! -f /newroot/boot/aurora-migration/local-virtual-only || rescue virtual-only-root-refused

@@ -1,0 +1,34 @@
+#!/bin/sh
+# Wait for real Linux battery data before the original HDI caches its paths.
+# Optional roots/retry counts are for isolated sysfs fixtures, never boot flags.
+root=${1:-/sys/class/power_supply}
+limit=${2:-15}
+# This minimal BusyBox ash has arithmetic expansion disabled.
+for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+    test "$attempt" -le "$limit" || break
+    count=0
+    selected=
+    for supply in "$root"/*; do
+        test -d "$supply" || continue
+        test "$(cat "$supply/type" 2>/dev/null)" = Battery || continue
+        test "$(cat "$supply/scope" 2>/dev/null)" != Device || continue
+        case "$count" in 0) count=1;; *) count=2;; esac
+        selected=$supply
+    done
+    if test "$count" = 1; then
+        capacity=$(cat "$selected/capacity" 2>/dev/null)
+        present=$(cat "$selected/present" 2>/dev/null)
+        status=$(cat "$selected/status" 2>/dev/null)
+        valid=1
+        case "$capacity" in ''|*[!0-9]*) valid=0;; esac
+        test "${#capacity}" -le 3 || valid=0
+        case "$status" in Charging|Discharging|Full|'Not charging') ;; *) valid=0;; esac
+        if test "$valid" = 1 && test "$present" = 1 && test "$capacity" -le 100; then
+            echo "HMOS_NATIVE_BATTERY_READY path=$selected capacity=$capacity present=$present status=$status"
+            exit 0
+        fi
+    fi
+    test "$attempt" -ge "$limit" || sleep 1
+done
+echo "HMOS_NATIVE_BATTERY_NOT_READY candidates=$count"
+exit 1
