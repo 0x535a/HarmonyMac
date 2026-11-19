@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-project=${1:?usage: build-buffer-vdi.sh PROJECT_SOURCE WORK_DIRECTORY}
+project=${1:?usage: build-buffer-vdi.sh PROJECT_SOURCE WORK_DIRECTORY [BUFFER_HANDLE_LIBRARY]}
 work=${2:?}
 project=$(realpath "$project")
 work=$(realpath "$work")
@@ -8,7 +8,7 @@ out=$work/aurora-graphics-build
 mkdir -p "$out"
 base=$project/ports/graphics
 prefix=$work/ohos-deps/system
-platform=/mnt/harmonyos-source/system/system/lib64/chipset-pub-sdk/libbuffer_handle.z.so
+platform=${3:-/mnt/harmonyos-source/system/system/lib64/chipset-pub-sdk/libbuffer_handle.z.so}
 test -f "$platform"
 "$work/ohos-toolchain/ohos-cc" -fPIC -O2 -Wall -Wextra -Werror \
     -I"$base/include" -I"$prefix/include" -I"$prefix/include/libdrm" \

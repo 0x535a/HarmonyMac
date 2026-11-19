@@ -1,0 +1,224 @@
+--- a/src/asahi/lib/agx_device.c
++++ b/src/asahi/lib/agx_device.c
+@@ -62,11 +62,32 @@
+    bo->_map_size = 0;
+ }
+ 
++DEBUG_GET_ONCE_BOOL_OPTION(aurora_asahi_va_trace, "AURORA_DIRECT_BUFFER_TRACE",
++                           false)
++
++enum { AGX_VA_COLLISION_RETRIES = 3, AGX_VA_TRACE_LIMIT = 32 };
++
++static bool
++agx_va_trace_error(void)
++{
++   static int events;
++   return debug_get_option_aurora_asahi_va_trace() &&
++          p_atomic_inc_return(&events) <= AGX_VA_TRACE_LIMIT;
++}
++
+ void
+ agx_drm_bo_close(struct agx_device *dev, uint32_t handle)
+ {
+    struct drm_gem_close args = {.handle = handle};
+-   drmIoctl(dev->fd, DRM_IOCTL_GEM_CLOSE, &args);
++   if (drmIoctl(dev->fd, DRM_IOCTL_GEM_CLOSE, &args)) {
++      const int saved_errno = errno;
++      if (agx_va_trace_error()) {
++         fprintf(stderr, "AURORA_ASAHI_GEM_CLOSE_ERROR mono_ns=%" PRId64
++                 " fd=%d vm=%u handle=%u errno=%d\n",
++                 os_time_get_nano(), dev->fd, dev->vm_id, handle, saved_errno);
++      }
++      errno = saved_errno;
++   }
+ }
+ 
+ static int
+@@ -122,6 +143,7 @@
+ agx_bo_free(struct agx_device *dev, struct agx_bo *bo)
+ {
+    const uint64_t handle = bo->handle;
++   struct agx_va *va = bo->va;
+ 
+    if (bo->_map)
+       dev->ops.bo_munmap(dev, bo);
+@@ -140,11 +162,6 @@
+       }
+    }
+ 
+-   /* Free the VA. No need to unmap the BO or unbind the VA, as the kernel will
+-    * take care of that when we close it.
+-    */
+-   agx_va_free(dev, bo->va, false);
+-
+    if (bo->prime_fd != -1)
+       close(bo->prime_fd);
+ 
+@@ -153,7 +170,10 @@
+    memset(bo, 0, sizeof(*bo));
+    __sync_synchronize();
+ 
++   /* GEM close retires the old object's mappings. Do not publish its VA
++    * to concurrent allocations before the close callback has run. */
+    dev->ops.bo_free(dev, handle);
++   agx_va_free(dev, va, false);
+ }
+ 
+ /*
+@@ -287,6 +307,68 @@
+    };
+ 
+    return dev->ops.bo_bind(dev, &op, 1);
++}
++
++/*
++ * Dynamic BOs can use another VA if the kernel still owns a previous
++ * mapping at the first address. Hold each rejected reservation through this
++ * attempt so the VMA allocator cannot immediately choose it again. Never
++ * issue UNBIND for a conflicting address, whose mapping we do not own.
++ */
++static bool
++agx_bind_bo_with_new_va(struct agx_device *dev, struct agx_bo *bo,
++                       uint64_t va_size, enum agx_va_flags va_flags,
++                       uint32_t bind_flags, const char *origin)
++{
++   const int entry_errno = errno;
++   static int policy_logged;
++   if (!dev->is_virtio && debug_get_option_aurora_asahi_va_trace() &&
++       !p_atomic_cmpxchg(&policy_logged, 0, 1)) {
++      fprintf(stderr, "AURORA_ASAHI_VA_POLICY mono_ns=%" PRId64
++              " fd=%d vm=%u recycle_after_gem_close=1 collision_retries=%u\n",
++              os_time_get_nano(), dev->fd, dev->vm_id, AGX_VA_COLLISION_RETRIES);
++   }
++
++   struct agx_va *rejected[AGX_VA_COLLISION_RETRIES];
++   unsigned count = 0;
++   int error = 0;
++   uint64_t collision = 0;
++   for (;;) {
++      bo->va = agx_va_alloc(dev, va_size, bo->align, va_flags, 0);
++      if (!bo->va) {
++         error = ENOMEM;
++         break;
++      }
++      errno = 0;
++      if (!agx_bo_bind(dev, bo, bo->va->addr, bo->size, 0, bind_flags)) {
++         error = 0;
++         break;
++      }
++
++      error = errno ? errno : EIO;
++      if (dev->is_virtio || error != EALREADY)
++         break;
++      if (!count)
++         collision = bo->va->addr;
++      if (count == ARRAY_SIZE(rejected))
++         break;
++      rejected[count++] = bo->va;
++   }
++
++   for (unsigned i = 0; i < count; ++i)
++      agx_va_free(dev, rejected[i], false);
++
++   if (collision && agx_va_trace_error()) {
++      fprintf(stderr, "AURORA_ASAHI_VA_REBIND mono_ns=%" PRId64
++              " fd=%d vm=%u origin=%s handle=%u size=%#" PRIx64
++              " conflict=%#" PRIx64 " final_va=%#" PRIx64
++              " retries=%u result=%s errno=%d\n",
++              os_time_get_nano(), dev->fd, dev->vm_id, origin, bo->uapi_handle,
++              (uint64_t)bo->size, collision, bo->va ? bo->va->addr : UINT64_C(0),
++              count, error ? "failed" : "recovered", error);
++   }
++   errno = error ? error : entry_errno;
++   return !error;
+ }
+ 
+ /*
+@@ -407,21 +489,17 @@
+    bo->prime_fd = -1;
+ 
+    enum agx_va_flags va_flags = flags & AGX_BO_LOW_VA ? AGX_VA_USC : 0;
+-   bo->va = agx_va_alloc(dev, size, bo->align, va_flags, 0);
+-   if (!bo->va) {
+-      fprintf(stderr, "Failed to allocate BO VMA\n");
+-      agx_bo_free(dev, bo);
+-      return NULL;
+-   }
+-
+    uint32_t bind = DRM_ASAHI_BIND_READ;
+    if (!(flags & AGX_BO_READONLY)) {
+       bind |= DRM_ASAHI_BIND_WRITE;
+    }
+ 
+-   ret = agx_bo_bind(dev, bo, bo->va->addr, bo->size, 0, bind);
+-   if (ret) {
++   if (!agx_bind_bo_with_new_va(dev, bo, size, va_flags, bind, "create")) {
++      const int saved_errno = errno;
++      if (!bo->va)
++         fprintf(stderr, "Failed to allocate BO VMA\n");
+       agx_bo_free(dev, bo);
++      errno = saved_errno;
+       return NULL;
+    }
+ 
+@@ -506,16 +584,6 @@
+          goto error;
+ 
+       p_atomic_set(&bo->refcnt, 1);
+-      bo->va = agx_va_alloc(dev, bo->size, bo->align, 0, 0);
+-
+-      if (!bo->va) {
+-         fprintf(
+-            stderr,
+-            "import failed: Could not allocate from VMA heap (0x%llx bytes)\n",
+-            (long long)bo->size);
+-         goto error;
+-      }
+-
+       if (dev->is_virtio) {
+          bo->uapi_handle = vdrm_handle_to_res_id(dev->vdrm, bo->handle);
+       } else
+@@ -523,11 +591,19 @@
+          bo->uapi_handle = bo->handle;
+       }
+ 
+-      ret = agx_bo_bind(dev, bo, bo->va->addr, bo->size, 0,
+-                        DRM_ASAHI_BIND_READ | DRM_ASAHI_BIND_WRITE);
+-      if (ret) {
+-         fprintf(stderr, "import failed: Could not bind BO at 0x%llx\n",
+-                 (long long)bo->va->addr);
++      if (!agx_bind_bo_with_new_va(dev, bo, bo->size, 0,
++                                   DRM_ASAHI_BIND_READ | DRM_ASAHI_BIND_WRITE,
++                                   "import")) {
++         const int saved_errno = errno;
++         if (bo->va) {
++            fprintf(stderr, "import failed: Could not bind BO at 0x%llx\n",
++                    (long long)bo->va->addr);
++         } else {
++            fprintf(stderr,
++                    "import failed: Could not allocate from VMA heap (0x%llx bytes)\n",
++                    (long long)bo->size);
++         }
++         errno = saved_errno;
+          goto error;
+       }
+    } else {
+@@ -565,14 +641,17 @@
+ 
+    return bo;
+ 
+-error:
++error: {
+    /* PRIME_FD_TO_HANDLE acquired a GEM reference before any of the fallible
+     * userspace setup above. Release the partially initialized entry and its
+     * handle together so a malformed import cannot poison a later handle
+     * reuse or leak one GEM reference per compositor retry. */
++   const int saved_errno = errno;
+    agx_bo_free(dev, bo);
+    simple_mtx_unlock(&dev->bo_map_lock);
++   errno = saved_errno;
+    return NULL;
++}
+ }
+ 
+ bool

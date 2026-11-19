@@ -1,17 +1,19 @@
 #!/bin/bash
 set -euo pipefail
-project=$(realpath "${1:?usage: build-composer.sh PROJECT WORK}")
+project=$(realpath "${1:?usage: build-composer.sh PROJECT WORK [OUTPUT]}")
 work=$(realpath "${2:?}")
-out=$work/aurora-graphics-build
+out=${3:-$work/aurora-graphics-build}
 prefix=$work/ohos-deps/system
 base=$project/ports/graphics
 mkdir -p "$out"
 "$work/ohos-toolchain/ohos-cc" -fPIC -O2 -Wall -Wextra -Werror \
     -I"$base/include" -I"$prefix/include" -I"$prefix/include/libdrm" \
     -c "$base/drm_device.c" -o "$out/drm_device.o"
+"$work/ohos-toolchain/ohos-cc" -fPIC -O2 -Wall -Wextra -Werror \
+    -c "$project/ports/hardware/backlight.c" -o "$out/backlight.o"
 "$work/ohos-toolchain/ohos-platform-cxx" -shared -fPIC -O2 -std=c++17 -Wall -Wextra \
     -I"$base/include" -I"$prefix/include" -I"$prefix/include/libdrm" \
-    "$base/composer.cpp" "$out/drm_device.o" -L"$prefix/lib64/aurora-mesa" -ldrm \
+    "$base/composer.cpp" "$out/drm_device.o" "$out/backlight.o" -L"$prefix/lib64/aurora-mesa" -ldrm -ldl \
     -Wl,--no-undefined,-soname,libdisplay_composer_vdi_impl.z.so \
     -Wl,-rpath,/system/lib64/aurora-mesa \
     -o "$out/libdisplay_composer_vdi_impl.z.so" > "$out/composer-build.log" 2>&1

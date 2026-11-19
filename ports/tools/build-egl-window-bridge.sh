@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
-project=$(realpath "${1:?usage: build-egl-window-bridge.sh PROJECT WORK}")
+project=$(realpath "${1:?usage: build-egl-window-bridge.sh PROJECT WORK [OUTPUT]}")
 work=$(realpath "${2:?}")
-out=$work/aurora-graphics-build
+out=${3:-$work/aurora-graphics-build}
 prefix=$work/ohos-deps/system
 base=$project/ports/graphics
 mkdir -p "$out"
@@ -17,6 +17,9 @@ mkdir -p "$out"
     -Wl,-rpath,/system/lib64/aurora-mesa \
     -o "$out/libEGL_impl.so" > "$out/egl-window-bridge-build.log" 2>&1
 readelf -dW "$out/libEGL_impl.so" > "$out/egl-window-bridge-dynamic.txt"
+"$work/ohos-toolchain/ohos-platform-cxx" -shared -fPIC -O2 -std=c++17 -Wall -Wextra \
+    "$base/scanout-window-format.cpp" -ldl -Wl,--no-undefined,-soname,libaurora_scanout_format.so \
+    -o "$out/libaurora_scanout_format.so" > "$out/scanout-window-format-build.log" 2>&1
 "$work/ohos-toolchain/ohos-platform-cxx" -O2 -std=c++17 -Wall -Wextra -DEGL_EGLEXT_PROTOTYPES \
     -I"$base/include" -I"$prefix/include" \
     "$project/ports/tests/egl-window-probe.cpp" \

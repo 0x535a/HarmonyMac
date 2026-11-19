@@ -18,15 +18,15 @@
 
 内核、modules、设备树及 initramfs 需要使用同一构建版本。固定 test7 名称仍保留在原生工具中，升级需要重新核对。
 
-## 软件显示路线
+## 显示路线
 
-应用/RenderService → OHOS EGL/NativeWindow 桥 → Mesa llvmpipe → 原装缓冲队列 → HDF allocator/composer → DRM/KMS → Apple 显示驱动。
+原装应用与 RenderService 使用鸿蒙 NativeWindow 队列。EGL 桥在可用的 Apple render node 上选择 Mesa/Asahi，软件回退使用 llvmpipe。RenderService 最终输出可将兼容的 GBM 前缓冲导出为 DMA-BUF，由 Composer 持有扫描输出生命周期并交给 Apple DRM/KMS。无法导入的布局使用 GPU blit 或原有 CPU 拷贝路径。
 
-`buffer_vdi.cpp` 使用 DRM dumb/PRIME 缓冲；`egl_window_bridge.cpp` 在 Mesa GBM 与鸿蒙 NativeWindow 队列之间传递像素；`composer.cpp` 将客户端合成目标复制到持久扫描缓冲并提交 KMS。当前所有 layer 回退为 CLIENT，没有硬件 overlay/cursor 加速。
+直送稳定后，Composer 在驱动提供 KMS out-fence 时可异步提交，交接期和回退路径仍保留同步提交。启动动画使用同一套后端选择，交接期间短暂保留最后一帧动画，直到第一帧有效 UI 或超时。默认只向原装服务暴露内屏。多屏的 VSync 回调生命周期和桌面会话仍需适配。
 
-平台 C++ 边界使用原装 `std::__h` / `libc++.so`，Mesa 内部 SDK `std::__n1` 对象不跨边界。固定镜像使用 56 字节 BufferHandle ABI，不能直接换成公开 API20 的 64 字节结构。
+平台 C++ 边界使用原装 `std::__h` / `libc++.so`，Mesa 内部 SDK `std::__n1` 对象不跨边界。固定镜像使用 56 字节 BufferHandle ABI。基础图层由 RenderService 合成，独立硬件 overlay/cursor 加速未验证。
 
-真机只有显示节点、无 renderD 节点时，现有 llvmpipe 路线需要显式设置 `GBM_ALWAYS_SOFTWARE=1`；仅设置 `LIBGL_ALWAYS_SOFTWARE` 不能代替 GBM 软件路径选择。
+后端选择、回退及探针见 [显示后端](../ports/graphics/README.md)。
 
 ## 原生启动经验
 

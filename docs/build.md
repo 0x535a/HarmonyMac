@@ -42,7 +42,7 @@ bash ports/tools/build-composer.sh "$PROJECT" "$WORK"
 bash ports/tools/build-egl-window-bridge.sh "$PROJECT" "$WORK"
 ```
 
-llvmpipe 是独立构建前缀，使用 `build-ohos-llvm.sh` 和 `build-ohos-llvmpipe.sh`。先将 `ports/tools/ohos-llvm19-toolchain.cmake` 与 `ohos-llvm-config.py` 复制到工作目录根，再构建目标 LLVM。CMake 文件按相邻 `ohos-toolchain/` 定位编译器。完整 LLVM 源码来源锁定与依赖构建流程仍待补齐，不能直接将 softpipe 命令替换为 llvmpipe 命令。
+llvmpipe 是独立构建前缀，使用 `build-ohos-llvm.sh` 和 `build-ohos-llvmpipe.sh`。先将 `ports/tools/ohos-llvm19-toolchain.cmake` 与 `ohos-llvm-config.py` 复制到工作目录根，再构建目标 LLVM。CMake 文件按相邻 `ohos-toolchain/` 定位编译器。完整 LLVM 源码来源锁定与依赖构建流程仍待补齐。Asahi 目标构建与补丁顺序见 [显示后端](../ports/graphics/README.md)。
 
 ## 内核与 initramfs
 

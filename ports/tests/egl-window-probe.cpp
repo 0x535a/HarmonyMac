@@ -51,6 +51,8 @@ extern "C" int OH_NativeWindow_NativeWindowRequestBuffer(NativeWindow *window, N
 extern "C" int OH_NativeWindow_NativeWindowAbortBuffer(NativeWindow *window, NativeBuffer *buffer)
 { ++window->aborts; allocator->FreeMem(*buffer->handle); delete buffer; return 0; }
 static int rendered_width = 13, rendered_height = 7;
+static int moving_x = -1;
+static int shader_frame = -1;
 extern "C" int OH_NativeWindow_NativeWindowFlushBuffer(NativeWindow *window, NativeBuffer *buffer, int fence, Region)
 {
     check(fence == -1, "synchronous release fence");
@@ -63,6 +65,29 @@ extern "C" int OH_NativeWindow_NativeWindowFlushBuffer(NativeWindow *window, Nat
         // GL bottom half is red; NativeWindow rows start at the top.
         bool red = rendered_height - 1 - uint64_t(y) * rendered_height / handle->height < rendered_height / 2;
         auto pixel = pixels + y * handle->stride + x * 4;
+        if (shader_frame>=0) {
+            int gy=handle->height-1-y;
+            const int red = (x+shader_frame*17)&255;
+            const int green = (gy+shader_frame*31)&255;
+            const int blue = (x^gy^shader_frame)&255;
+            if (pixel[rgba?0:2]!=red || pixel[1]!=green || pixel[rgba?2:0]!=blue || pixel[3]!=255) {
+                unsigned char source[4]{};
+                glReadPixels(x, gy, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, source);
+                fprintf(stderr, "shader frame %d at %d,%d format=%d read=%u,%u,%u,%u expected=%d,%d,%d,255 source=%u,%u,%u,%u\n",
+                        shader_frame, x, y, handle->format, pixel[rgba?0:2], pixel[1], pixel[rgba?2:0], pixel[3],
+                        red, green, blue, source[0], source[1], source[2], source[3]);
+                check(false, "completed shader frame visible to synchronous queue consumer");
+            }
+            continue;
+        }
+        if (moving_x>=0) {
+            int gy=handle->height-1-y;
+            bool box=x>=moving_x && x<moving_x+2 && gy>=1 && gy<3;
+            check(pixel[0]==(box?255:0) && pixel[1]==(box?255:0) &&
+                  pixel[2]==(box?255:0) && pixel[3]==(box?255:0),
+                  "moving transparent frame has no earlier box pixels");
+            continue;
+        }
         check(pixel[rgba ? 0 : 2] == (red ? 255 : 0) && pixel[1] == (red ? 0 : 255) &&
               pixel[rgba ? 2 : 0] == 64 && pixel[3] == 255, "queue pixel orientation/format/scaling");
     }
@@ -184,6 +209,53 @@ int main()
     glBindFramebuffer(GL_FRAMEBUFFER, 0); glDeleteFramebuffers(1, &image_fbo); glDeleteTextures(1, &texture);
     check(destroy_image(display, image), "native image cleanup");
     puts("EGL_NATIVE_BUFFER_IMPORT_PASS rgba=17,51,85,255 closed-origin-fd");
+    // Real reused Mesa window buffers, not screenshots: a transparent
+    // composition pass paints a moving box without an explicit full clear.
+    // The copy WSI promises no valid history (age zero). Invalid backbuffers
+    // must not accumulate previous transparent-frame content.
+    EGLSurface motion=eglCreateWindowSurface(display,config,reinterpret_cast<EGLNativeWindowType>(&window),nullptr);
+    check(motion!=EGL_NO_SURFACE && eglMakeCurrent(display,motion,motion,context),"motion surface");
+    for (int i=0;i<32;++i) {
+        moving_x=i%(window.width-2);
+        glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+        glEnable(GL_SCISSOR_TEST);glScissor(moving_x,1,2,2);glClearColor(1,1,1,1);glClear(GL_COLOR_BUFFER_BIT);
+        glColorMask(GL_FALSE,GL_TRUE,GL_FALSE,GL_TRUE);
+        check(eglSwapBuffers(display,motion),"transparent motion swap");
+        GLboolean mask[4]={};glGetBooleanv(GL_COLOR_WRITEMASK,mask);
+        GLint clip[4]={};glGetIntegerv(GL_SCISSOR_BOX,clip);
+        GLfloat clear[4]={};glGetFloatv(GL_COLOR_CLEAR_VALUE,clear);
+        check(glIsEnabled(GL_SCISSOR_TEST) && clip[0]==moving_x && clip[1]==1 && clip[2]==2 && clip[3]==2 &&
+              !mask[0] && mask[1] && !mask[2] && mask[3] && clear[0]==1 && clear[1]==1 && clear[2]==1 && clear[3]==1 &&
+              glGetError()==GL_NO_ERROR,"backbuffer reset preserves application clear state");
+    }
+    moving_x=-1;glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);glDisable(GL_SCISSOR_TEST);
+    check(eglDestroySurface(display,motion) && eglMakeCurrent(display,surface,surface,context),"motion surface cleanup");
+    puts("EGL_TRANSPARENT_MOTION_PASS frames=32 old-pixels=0 clear-state-preserved");
+    // Exercise actual queued shader work, not only clears. Every frame has a
+    // different coordinate-dependent pixel pattern; the consumer checks all
+    // pixels immediately inside FlushBuffer, without inserting its own finish.
+    window.width=257;window.height=129;
+    EGLSurface shaded=eglCreateWindowSurface(display,config,reinterpret_cast<EGLNativeWindowType>(&window),nullptr);
+    check(shaded!=EGL_NO_SURFACE && eglMakeCurrent(display,shaded,shaded,context),"shader surface");
+    auto compile=[](GLenum type,const char *text) {
+        GLuint s=glCreateShader(type);glShaderSource(s,1,&text,nullptr);glCompileShader(s);
+        GLint ok=0;glGetShaderiv(s,GL_COMPILE_STATUS,&ok);check(ok,"pixel-pattern shader compile");return s;
+    };
+    const char *vs="#version 300 es\nvoid main(){ vec2 p=vec2((gl_VertexID==1)?3.0:-1.0,(gl_VertexID==2)?3.0:-1.0);gl_Position=vec4(p,0,1);}";
+    const char *fs="#version 300 es\nprecision highp float; precision highp int; uniform int frame; out vec4 color; void main(){ ivec2 p=ivec2(gl_FragCoord.xy);ivec3 c=ivec3((p.x+frame*17)&255,(p.y+frame*31)&255,(p.x^p.y^frame)&255);color=vec4(vec3(c)/255.0,1);}";
+    GLuint vertex=compile(GL_VERTEX_SHADER,vs),fragment=compile(GL_FRAGMENT_SHADER,fs),program=glCreateProgram();
+    glAttachShader(program,vertex);glAttachShader(program,fragment);glLinkProgram(program);
+    GLint linked=0;glGetProgramiv(program,GL_LINK_STATUS,&linked);check(linked,"pixel-pattern shader link");
+    glUseProgram(program);GLint uniform=glGetUniformLocation(program,"frame");check(uniform>=0,"pixel-pattern uniform");
+    glViewport(0,0,257,129);glDisable(GL_BLEND);glDisable(GL_SCISSOR_TEST);
+    for (shader_frame=0;shader_frame<24;++shader_frame) {
+        glUniform1i(uniform,shader_frame);glDrawArrays(GL_TRIANGLES,0,3);
+        check(eglSwapBuffers(display,shaded),"shader frame synchronous publication");
+        check(glGetError()==GL_NO_ERROR,"pixel-pattern shader state");
+    }
+    shader_frame=-1;glUseProgram(0);glDeleteProgram(program);glDeleteShader(vertex);glDeleteShader(fragment);
+    check(eglDestroySurface(display,shaded) && eglMakeCurrent(display,surface,surface,context),"shader surface cleanup");
+    puts("EGL_SHADER_PUBLICATION_PASS frames=24 pixels-per-frame=33153 alternating-RGBA-BGRA");
     check(eglDestroySurface(display, surface) && window.refs == 1, "destroy current surface deferred native release");
     check(eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT) && window.refs == 0, "unbind releases native window");
     check(eglDestroyContext(display, context) && eglTerminate(display), "EGL cleanup");

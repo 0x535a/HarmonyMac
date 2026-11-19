@@ -37,6 +37,10 @@ int main()
     auto commit = symbol<int (*)(uint32_t, int32_t *)>(library, "Commit");
     auto vblank = symbol<int (*)(uint32_t, Vblank, void *)>(library, "RegDisplayVBlankCallback");
     auto vsync = symbol<int (*)(uint32_t, bool)>(library, "SetDisplayVsyncEnabled");
+    auto get_power = symbol<int (*)(uint32_t, int32_t *)>(library, "GetDisplayPowerStatus");
+    auto set_power = symbol<int (*)(uint32_t, int32_t)>(library, "SetDisplayPowerStatus");
+    auto get_backlight = symbol<int (*)(uint32_t, uint32_t *)>(library, "GetDisplayBacklight");
+    auto set_backlight = symbol<int (*)(uint32_t, uint32_t)>(library, "SetDisplayBacklight");
     bool connected = false;
     check(!plug(hotplug, &connected) && connected, "hotplug notification");
     Capability cap;
@@ -77,7 +81,33 @@ int main()
     // Keep the C++ VDI call in a separate header to exercise its real vtable.
     extern int present_allocated(void *, int (*)(uint32_t, const BufferHandle *, int32_t),
                                 int (*)(uint32_t, const Rect *), int (*)(uint32_t, int32_t *));
+    extern void present_direct(void *, const Mode &, int (*)(uint32_t, const BufferHandle *, int32_t),
+                               int (*)(uint32_t, const Rect *), int (*)(uint32_t, int32_t *),
+                               int (*)(uint32_t));
+    if (getenv("AURORA_DIRECT_SCANOUT"))
+        present_direct(allocator_library, display_modes.front(), client, crop, commit, clear);
     check(!present_allocated(allocator_library, client, crop, commit), "allocated presentations");
+    int32_t power = -1;
+    int power_result = get_power(0, &power);
+    if (power_result == -5) {
+        puts("COMPOSER_DPMS_UNSUPPORTED");
+    } else {
+        check(power_result == 0 && power >= 0 && power <= 3, "real DPMS query");
+        int32_t saved_power = power;
+        check(!set_power(0, 3) && !get_power(0, &power) && power == 3, "DPMS off");
+        check(!set_power(0, 0) && !get_power(0, &power) && power == 0, "DPMS on");
+        check(!set_power(0, saved_power), "restore DPMS");
+        puts("COMPOSER_DPMS_OFF_ON_PASS");
+    }
+    check(set_power(0, 4) != 0 && get_power(1, &power) != 0 && get_power(0, nullptr) != 0,
+          "invalid display/power rejected");
+    // This diagnostic guest has no backlight device; absence is a failure,
+    // not a successful zero brightness. Real Apple sysfs remains untested.
+    uint32_t light = 77;
+    check(get_backlight(0, &light) != 0 && light == 77 && set_backlight(0, 128) != 0,
+          "absent virtual backlight reported honestly");
+    check(get_backlight(0, nullptr) != 0 && set_backlight(0, 256) != 0,
+          "invalid backlight rejected");
     check(!clear(0) && !destroy(0, id), "client/layer cleanup");
     puts("COMPOSER_FULL_PROBE_PASS");
     // dlclose joins the callback thread and restores the previous CRTC.
@@ -86,6 +116,53 @@ int main()
 }
 
 #include "idisplay_buffer_vdi.h"
+void present_direct(void *library, const Mode &mode,
+                    int (*client)(uint32_t, const BufferHandle *, int32_t),
+                    int (*crop)(uint32_t, const Rect *), int (*commit)(uint32_t, int32_t *),
+                    int (*clear)(uint32_t))
+{
+    using Vdi = OHOS::HDI::Display::Buffer::V1_0::IDisplayBufferVdi;
+    auto create = symbol<Vdi *(*)()>(library, "CreateDisplayBufferVdi");
+    auto destroy = symbol<void (*)(Vdi *)>(library, "DestroyDisplayBufferVdi");
+    Vdi *allocator = create(); check(allocator, "direct allocator factory");
+    check(mode.width > 0 && mode.height > 0, "direct mode dimensions");
+    BufferHandle *buffers[3]{};
+    OHOS::HDI::Display::Buffer::V1_0::AllocInfo info = {
+        uint32_t(mode.width), uint32_t(mode.height), HBM_USE_CPU_READ | HBM_USE_CPU_WRITE, PIXEL_FMT_BGRX_8888, 0,
+    };
+    const Rect region = {0, 0, int(mode.width), int(mode.height)};
+    int fence;
+    for (unsigned i = 0; i < 3; ++i) {
+        check(!allocator->AllocMem(info, buffers[i]) && buffers[i], "direct DMA-BUF allocation");
+        auto &buffer = *buffers[i];
+        auto *pixels = static_cast<unsigned char *>(allocator->Mmap(buffer));
+        check(pixels, "direct DMA-BUF CPU mapping");
+        for (int y = 0; y < buffer.height; ++y) {
+            for (int x = 0; x < buffer.width; ++x) {
+                auto pixel = pixels + y * buffer.stride + x * 4;
+                pixel[0] = 32 + i * 16;
+                pixel[1] = y < buffer.height / 2 ? 255 : 0;
+                pixel[2] = x < buffer.width / 2 ? 255 : 0;
+                pixel[3] = 255;
+            }
+        }
+        check(!allocator->FlushCache(buffer) && !allocator->Unmap(buffer), "publish direct pixels");
+        check(!crop(0, &region) && !client(0, &buffer, -1) && !commit(0, &fence),
+              "direct KMS frame commit");
+    }
+    puts("COMPOSER_DIRECT_VISIBLE blue=64");
+    sleep(5);
+    // Leave a different client queued without committing it. Clear must
+    // preserve the last presented frame, not use the queued target.
+    check(!client(0, buffers[0], -1), "queue a different target before clear");
+    check(!clear(0), "release imported framebuffer");
+    check(!clear(0), "repeat clear after imported framebuffer retirement");
+    puts("COMPOSER_DIRECT_CLEAR_VISIBLE blue=64");
+    sleep(3);
+    for (auto buffer : buffers) allocator->FreeMem(*buffer);
+    destroy(allocator);
+}
+
 int present_allocated(void *library, int (*client)(uint32_t, const BufferHandle *, int32_t),
                       int (*crop)(uint32_t, const Rect *), int (*commit)(uint32_t, int32_t *))
 {

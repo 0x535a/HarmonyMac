@@ -1,13 +1,16 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * Linear RGB buffer VDI for the fixed HAD ABI. Uses DRM dumb/PRIME, not ION,
- * vendor IOVA, a Mali helper, or a Debian runtime.
+ * Linear RGB, YUV and BLOB buffer VDI for the fixed HAD ABI.
+ * Scanout and YUV use DRM dumb/PRIME. Compressed byte buffers use a DMA heap.
  */
 #include "include/idisplay_buffer_vdi.h"
 #include "include/aurora_drm.h"
 #include "include/display_type.h"
+#include "include/linear_yuv420.h"
+#include <atomic>
 #include <cerrno>
 #include <climits>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -15,6 +18,7 @@
 #include <vector>
 #include <fcntl.h>
 #include <linux/dma-buf.h>
+#include <linux/dma-heap.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -28,6 +32,9 @@ using Identity = std::pair<uint64_t, uint64_t>;
 namespace {
 constexpr uint64_t VENDOR_LAYOUT = UINT64_C(0xfffff) << 44;
 constexpr uint64_t ALIGN_512 = UINT64_C(1) << 18;
+constexpr uint32_t MAX_LINEAR_BYTES = 256 * 1024 * 1024;
+// GRAPHIC_PIXEL_FMT_BLOB in graphic_surface's surface_type.h.
+constexpr uint32_t BLOB_FORMAT = 38;
 std::mutex metadata_lock;
 std::map<Identity, std::map<uint32_t, std::vector<uint8_t>>> metadata;
 
@@ -41,17 +48,28 @@ bool identity(const BufferHandle &handle, Identity &id)
 
 bool supported(uint32_t width, uint32_t height, uint32_t format, uint64_t usage)
 {
-    if (!width || !height || width > 16384 || height > 16384 ||
-        static_cast<uint64_t>(width) * height * 4 > 256 * 1024 * 1024) return false;
-    if (format != PIXEL_FMT_RGBX_8888 && format != PIXEL_FMT_RGBA_8888 &&
-        format != PIXEL_FMT_BGRX_8888 && format != PIXEL_FMT_BGRA_8888) return false;
     if (usage & HBM_USE_PROTECTED) return false;
     if ((usage & VENDOR_LAYOUT) && !(usage & (HBM_USE_CPU_READ | HBM_USE_CPU_WRITE))) return false;
+    if (format == BLOB_FORMAT) return height == 1 && width && width <= MAX_LINEAR_BYTES;
+    if (!width || !height || width > 16384 || height > 16384 ||
+        static_cast<uint64_t>(width) * height * 4 > MAX_LINEAR_BYTES) return false;
+    if (AuroraIsLinearYuv420(format)) {
+        if ((width | height) & 1) return false;
+    } else if (format != PIXEL_FMT_RGBX_8888 && format != PIXEL_FMT_RGBA_8888 &&
+               format != PIXEL_FMT_BGRX_8888 && format != PIXEL_FMT_BGRA_8888) {
+        return false;
+    }
     return true;
 }
 
 bool valid(const BufferHandle &handle)
 {
+    if (AuroraIsLinearYuv420(handle.format)) return AuroraValidLinearYuv420(handle);
+    if (handle.format == BLOB_FORMAT) {
+        return handle.fd >= 0 && handle.width > 0 && handle.stride >= handle.width &&
+            handle.size >= handle.stride &&
+            supported(handle.width, handle.height, handle.format, handle.usage);
+    }
     return handle.fd >= 0 && handle.width > 0 && handle.height > 0 &&
         handle.size > 0 && handle.stride >= static_cast<int64_t>(handle.width) * 4 &&
         static_cast<int64_t>(handle.stride) * handle.height <= handle.size;
@@ -71,11 +89,42 @@ int sync_dma(int fd, uint64_t flags)
         fflush(stderr);                                      \
     } while (0)
 
+// Routine per-frame diagnostics are opt-in. Real allocation/mapping failures
+// below retain their unconditional error breadcrumbs.
+static bool trace_enabled()
+{
+    static const bool value = [] {
+        const char *s = std::getenv("AURORA_GRAPHICS_TRACE");
+        return s && !std::strcmp(s, "1");
+    }();
+    return value;
+}
+#define AURORA_VDI_TRACE(...) do { if (trace_enabled()) AURORA_VDI_LOG(__VA_ARGS__); } while (0)
+
+int allocate_blob(uint64_t size)
+{
+    int heap = open("/dev/dma_heap/system", O_RDWR | O_CLOEXEC);
+    if (heap < 0) {
+        AURORA_VDI_LOG("AllocMem BLOB heap open failed errno=%d", errno);
+        return -1;
+    }
+    struct dma_heap_allocation_data request = {size, 0, O_RDWR | O_CLOEXEC, 0};
+    const int result = ioctl(heap, DMA_HEAP_IOCTL_ALLOC, &request);
+    const int error = errno;
+    close(heap);
+    if (result) {
+        AURORA_VDI_LOG("AllocMem BLOB heap allocation failed errno=%d", error);
+        return -1;
+    }
+    return static_cast<int>(request.fd);
+}
+
 /* Log the direct caller address plus a one-shot /proc/self/maps so each VDI
  * invocation can be attributed to the exact service wrapper library
  * (mapper vs metadata vs allocator client) offline. */
 static void log_caller(const char *what, void *ra0)
 {
+    if (!trace_enabled()) return;
     AURORA_VDI_LOG("%s caller=%p", what, ra0);
     static bool maps_dumped = false;
     if (!maps_dumped) {
@@ -99,34 +148,16 @@ class BufferVdi final : public V1_0::IDisplayBufferVdi {
     mutable std::mutex lock_;
     mutable AuroraDrmDisplay display_ = {};
     mutable std::map<Identity, Mapping> mappings_;
-public:
-    BufferVdi() { display_.fd = -1; }
-    ~BufferVdi() override
-    {
-        for (const auto &item : mappings_) munmap(item.second.address, item.second.size);
-        if (display_.fd >= 0) close(display_.fd);
-    }
 
-    int32_t AllocMem(const BufferAllocInfo &info, BufferHandle *&out) const override
+    int AllocateDumb(uint32_t width, uint32_t height, uint32_t &stride, uint64_t &size) const
     {
-        out = nullptr;
-        AURORA_VDI_LOG("AllocMem w=%u h=%u fmt=%d usage=0x%llx expected=%zu",
-                       info.width, info.height, static_cast<int>(info.format),
-                       static_cast<unsigned long long>(info.usage), info.expectedSize);
-        if (!supported(info.width, info.height, info.format, info.usage)) {
-            AURORA_VDI_LOG("AllocMem NOT_SUPPORT by validation");
-            return NOT_SUPPORT;
-        }
-        std::lock_guard<std::mutex> guard(lock_);
         if (display_.fd < 0 && AuroraOpenDisplayDrm(&display_, 0)) {
             AURORA_VDI_LOG("AllocMem drm open failed");
             return -1;
         }
-        uint32_t allocated_width = info.width;
-        if (info.usage & ALIGN_512) allocated_width = (allocated_width + 127) & ~127U;
         struct drm_mode_create_dumb request = {};
-        request.width = allocated_width;
-        request.height = info.height;
+        request.width = width;
+        request.height = height;
         request.bpp = 32;
         if (ioctl(display_.fd, DRM_IOCTL_MODE_CREATE_DUMB, &request)) {
             AURORA_VDI_LOG("AllocMem CREATE_DUMB errno=%d", errno);
@@ -140,9 +171,58 @@ public:
             AURORA_VDI_LOG("AllocMem PRIME_HANDLE_TO_FD ret=%d errno=%d", ret, errno);
             return -1;
         }
-        if (request.size > INT_MAX || request.size < info.expectedSize) {
-            AURORA_VDI_LOG("AllocMem size mismatch got=%u expected=%zu",
-                           request.size, info.expectedSize);
+        stride = request.pitch;
+        size = request.size;
+        return fd;
+    }
+
+public:
+    BufferVdi() { display_.fd = -1; }
+    ~BufferVdi() override
+    {
+        for (const auto &item : mappings_) munmap(item.second.address, item.second.size);
+        if (display_.fd >= 0) close(display_.fd);
+    }
+
+    int32_t AllocMem(const BufferAllocInfo &info, BufferHandle *&out) const override
+    {
+        out = nullptr;
+        AURORA_VDI_TRACE("AllocMem w=%u h=%u fmt=%d usage=0x%llx expected=%zu",
+                       info.width, info.height, static_cast<int>(info.format),
+                       static_cast<unsigned long long>(info.usage), info.expectedSize);
+        if (!supported(info.width, info.height, info.format, info.usage)) {
+            static std::atomic<unsigned> rejected{0};
+            if (rejected.load(std::memory_order_relaxed) < 12 &&
+                rejected.fetch_add(1, std::memory_order_relaxed) < 12) {
+                AURORA_VDI_LOG("AllocMem NOT_SUPPORT w=%u h=%u fmt=%d usage=0x%llx expected=%zu",
+                    info.width, info.height, static_cast<int>(info.format),
+                    static_cast<unsigned long long>(info.usage), info.expectedSize);
+            }
+            return NOT_SUPPORT;
+        }
+        std::lock_guard<std::mutex> guard(lock_);
+        uint32_t allocated_width = info.width;
+        if (info.usage & ALIGN_512) allocated_width = (allocated_width + 127) & ~127U;
+        uint32_t stride;
+        uint64_t size;
+        const bool yuv = AuroraIsLinearYuv420(info.format);
+        // Bridge the kernel's 32-bit dumb allocation restriction by allocating
+        // byte-equivalent storage. The YUV format belongs to the exported handle.
+        const uint32_t storage_width = yuv ? (allocated_width + 3) / 4 : allocated_width;
+        const uint32_t storage_rows = yuv ? info.height + info.height / 2 : info.height;
+        int fd;
+        if (info.format == BLOB_FORMAT) {
+            stride = allocated_width;
+            size = info.expectedSize > stride ? info.expectedSize : stride;
+            if (size > MAX_LINEAR_BYTES) return NOT_SUPPORT;
+            fd = allocate_blob(size);
+        } else {
+            fd = AllocateDumb(storage_width, storage_rows, stride, size);
+        }
+        if (fd < 0) return -1;
+        if (size > INT_MAX || size < info.expectedSize) {
+            AURORA_VDI_LOG("AllocMem size mismatch got=%llu expected=%zu",
+                           static_cast<unsigned long long>(size), info.expectedSize);
             close(fd);
             return NOT_SUPPORT;
         }
@@ -155,14 +235,14 @@ public:
         handle->fd = fd;
         handle->width = info.width;
         handle->height = info.height;
-        handle->stride = request.pitch;
-        handle->size = request.size;
+        handle->stride = stride;
+        handle->size = size;
         handle->format = info.format;
         handle->usage = info.usage & ~VENDOR_LAYOUT;
         handle->virAddr = nullptr;
         handle->phyAddr = 0;
         out = handle;
-        AURORA_VDI_LOG("AllocMem OK fd=%d stride=%d size=%u handle=%p",
+        AURORA_VDI_TRACE("AllocMem OK fd=%d stride=%d size=%u handle=%p",
                        handle->fd, handle->stride, handle->size,
                        static_cast<void *>(handle));
         return 0;
@@ -171,7 +251,7 @@ public:
     void FreeMem(const BufferHandle &handle) const override
     {
         Identity id;
-        AURORA_VDI_LOG("FreeMem fd=%d", handle.fd);
+        AURORA_VDI_TRACE("FreeMem fd=%d", handle.fd);
         log_caller("FreeMem", __builtin_return_address(0));
         if (identity(handle, id)) {
             {
@@ -191,7 +271,7 @@ public:
     void *Mmap(const BufferHandle &handle) const override
     {
         Identity id;
-        AURORA_VDI_LOG("Mmap fd=%d w=%u h=%u size=%u", handle.fd, handle.width,
+        AURORA_VDI_TRACE("Mmap fd=%d w=%u h=%u size=%u", handle.fd, handle.width,
                        handle.height, handle.size);
         log_caller("Mmap", __builtin_return_address(0));
         if (!valid(handle) || !identity(handle, id)) {
@@ -221,7 +301,7 @@ public:
         /* The stock HDI mapper reports status and the client wrapper reads
          * handle.virAddr, rather than forwarding our pointer return value. */
         const_cast<BufferHandle &>(handle).virAddr = address;
-        AURORA_VDI_LOG("Mmap OK fd=%d addr=%p", handle.fd, address);
+        AURORA_VDI_TRACE("Mmap OK fd=%d addr=%p", handle.fd, address);
         return address;
     }
 
@@ -242,14 +322,14 @@ public:
 
     int32_t FlushCache(const BufferHandle &handle) const override
     {
-        AURORA_VDI_LOG("FlushCache fd=%d", handle.fd);
+        AURORA_VDI_TRACE("FlushCache fd=%d", handle.fd);
         if (sync_dma(handle.fd, DMA_BUF_SYNC_START | DMA_BUF_SYNC_WRITE)) return -1;
         return sync_dma(handle.fd, DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE);
     }
 
     int32_t InvalidateCache(const BufferHandle &handle) const override
     {
-        AURORA_VDI_LOG("InvalidateCache fd=%d", handle.fd);
+        AURORA_VDI_TRACE("InvalidateCache fd=%d", handle.fd);
         if (sync_dma(handle.fd, DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ)) return -1;
         return sync_dma(handle.fd, DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ);
     }
@@ -262,7 +342,7 @@ public:
         results.reserve(infos.size());
         for (const auto &info : infos) {
             bool ok = supported(info.width, info.height, info.format, info.usage);
-            AURORA_VDI_LOG("IsSupportedAlloc w=%u h=%u fmt=%d usage=0x%llx -> %d",
+            AURORA_VDI_TRACE("IsSupportedAlloc w=%u h=%u fmt=%d usage=0x%llx -> %d",
                            info.width, info.height, static_cast<int>(info.format),
                            static_cast<unsigned long long>(info.usage), ok);
             results.push_back(ok);
@@ -273,16 +353,26 @@ public:
     int32_t RegisterBuffer(const BufferHandle &handle) override
     {
         Identity id;
-        AURORA_VDI_LOG("RegisterBuffer fd=%d w=%u h=%u stride=%d size=%u",
+        AURORA_VDI_TRACE("RegisterBuffer fd=%d w=%u h=%u stride=%d size=%u",
                        handle.fd, handle.width, handle.height, handle.stride, handle.size);
         log_caller("RegisterBuffer", __builtin_return_address(0));
-        return valid(handle) && identity(handle, id) ? 0 : -1;
+        const bool layout_ok = valid(handle);
+        if (layout_ok && identity(handle, id)) return 0;
+        const int error = layout_ok ? errno : 0;
+        static std::atomic<unsigned> rejected{0};
+        if (rejected.load(std::memory_order_relaxed) < 8 &&
+            rejected.fetch_add(1, std::memory_order_relaxed) < 8) {
+            AURORA_VDI_LOG("RegisterBuffer rejected fd=%d w=%d h=%d stride=%d size=%d fmt=%d usage=0x%llx layout=%d errno=%d",
+                handle.fd, handle.width, handle.height, handle.stride, handle.size, handle.format,
+                static_cast<unsigned long long>(handle.usage), layout_ok, error);
+        }
+        return -1;
     }
 
     int32_t SetMetadata(const BufferHandle &handle, uint32_t key, const std::vector<uint8_t> &value) override
     {
         Identity id;
-        AURORA_VDI_LOG("SetMetadata fd=%d key=%u bytes=%zu", handle.fd, key, value.size());
+        AURORA_VDI_TRACE("SetMetadata fd=%d key=%u bytes=%zu", handle.fd, key, value.size());
         if (!identity(handle, id) || value.size() > 65536) return -1;
         std::lock_guard<std::mutex> guard(metadata_lock);
         if (!metadata.count(id) && metadata.size() >= 1024) return -1;
@@ -299,12 +389,12 @@ public:
         std::lock_guard<std::mutex> guard(metadata_lock);
         auto object = metadata.find(id);
         if (object == metadata.end()) {
-            AURORA_VDI_LOG("GetMetadata key=%u no-object NOT_SUPPORT", key);
+            AURORA_VDI_TRACE("GetMetadata key=%u no-object NOT_SUPPORT", key);
             return NOT_SUPPORT;
         }
         auto item = object->second.find(key);
         if (item == object->second.end()) {
-            AURORA_VDI_LOG("GetMetadata key=%u absent NOT_SUPPORT", key);
+            AURORA_VDI_TRACE("GetMetadata key=%u absent NOT_SUPPORT", key);
             return NOT_SUPPORT;
         }
         value = item->second;
@@ -335,11 +425,18 @@ public:
 
     int32_t GetImageLayout(const BufferHandle &handle, V1_2::ImageLayout &layout) const override
     {
-        AURORA_VDI_LOG("GetImageLayout fd=%d fmt=%d", handle.fd,
+        AURORA_VDI_TRACE("GetImageLayout fd=%d fmt=%d", handle.fd,
                        static_cast<int>(handle.format));
         if (!valid(handle)) return -1;
         layout.pixelFormat = handle.format;
-        layout.planes = {{0, 4, static_cast<uint32_t>(handle.stride)}};
+        const auto stride = static_cast<uint32_t>(handle.stride);
+        if (AuroraIsLinearYuv420(handle.format)) {
+            layout.planes = {{0, 1, stride}, {stride * static_cast<uint32_t>(handle.height), 2, stride}};
+        } else if (handle.format == BLOB_FORMAT) {
+            layout.planes = {{0, stride, 1}};
+        } else {
+            layout.planes = {{0, 4, stride}};
+        }
         return 0;
     }
 };

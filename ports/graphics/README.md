@@ -1,23 +1,27 @@
 # Aurora 鸿蒙显示后端
 
-当前为 OHOS ABI Mesa 软件渲染、原装 NativeWindow 队列与 DRM/KMS 输出。最新真机状态见 [状态说明](../../docs/status.md)，构建入口见 [构建说明](../../docs/build.md)。
+原装 RenderService 和启动动画经 EGL 桥选择 Mesa/Asahi 或软件渲染。Composer 将兼容的 GBM/DMA-BUF 直接交给 DRM/KMS，支持同步复制回退。默认只向原装服务暴露内屏。已有真机和虚拟测试范围见 [状态页](../../docs/status.md)。
 
-## 组件
+## 构建
 
-- `drm_device.c` 枚举 DRM card，忽略 simpledrm，优先 appledrm 与内屏。
-- `buffer_vdi.cpp` 使用 dumb/PRIME 分配线性 RGBA/RGBX/BGRA/BGRX 缓冲，写回原装 HDI 所需的 `BufferHandle.virAddr`，拒绝 protected buffer。
-- `composer.cpp` 全部 layer 回退 CLIENT，将客户端目标复制到持久双缓冲，执行 DMA-BUF CPU 写入同步并提交 KMS。同步等待翻页，超时保留 pending 状态。
-- `egl_window_bridge.cpp` 以独立 `libEGL_impl.so` 加载 OHOS Mesa EGL，通过 GBM backing 保留 GLES 默认 framebuffer 语义；swap 转换像素并提交到鸿蒙队列，按实际 geometry 延迟创建 backing。
-- `patches/` 包含 Mesa profiler 开销修正、资源释放和有界绘制诊断补丁。诊断补丁按需使用。
+先按 [构建说明](../../docs/build.md) 准备 OHOS 工具链、Mesa 依赖、原装平台库和 LLVM 19。Asahi 与 llvmpipe 共用固定的 [Mesa 源码提交](source-lock.json)。在独立 Mesa 工作树检查并应用 VA 重用补丁，先构建同版本的宿主 `mesa_clc`、`vtn_bindgen2`、`asahi_clc` 到 `build/src` 下，再构建 OHOS 目标库。
 
-## ABI 与测试
+```sh
+git -C "$MESA" apply --check "$PROJECT/ports/graphics/patches/mesa-asahi-bo-va-recycle.patch"
+git -C "$MESA" apply "$PROJECT/ports/graphics/patches/mesa-asahi-bo-va-recycle.patch"
+bash ports/tools/build-ohos-llvmpipe.sh "$MESA" "$WORK" --asahi
+```
 
-平台边界使用原装 `std::__h` 和 `libc++.so`，SDK 的 `std::__n1` 对象不跨边界传递。`buffer_handle.h` 为固定镜像的 56 字节内部 ABI，不能换成 API20 的 64 字节布局。
+Asahi 构建安装到 `$WORK/asahi-deps/system`。将其中的 Mesa 头文件和目标库整合到 `$WORK/ohos-deps/system`，保留 libdrm 和其他依赖，然后构建 [allocator](../tools/build-buffer-vdi.sh)、[Composer](../tools/build-composer.sh) 和 [EGL 桥](../tools/build-egl-window-bridge.sh)。软件专用构建省略 `--asahi`，使用独立输出目录。
 
-构建入口在 `../tools/`：`build-buffer-vdi.sh`、`build-composer.sh`、`build-egl-window-bridge.sh`。测试源码在 `../tests/`，覆盖 allocator/composer、EGL、原装队列、RenderService 和 VSync。
+## 后端与回退
 
-## 限制
+- [RenderService 启动脚本](render-service-start.sh) 检查 Asahi DRM render node；匹配的 init 环境须提供软件回退所需的 GBM/Mesa 设置。传入 `--bootanimation` 时为原装启动动画选择后端。
+- [Composer 启动脚本](composer-start.sh) 默认启用直送，并清除实验性的多屏环境开关。内核参数 `aurora.scanout=copy` 禁用直送，`aurora.graphics=software` 同时选择软件渲染。两个脚本由匹配候选的服务配置调用。
+- Composer 若能获得 KMS out-fence，在正常直送翻页时返回该围栏。调试时可在 Composer 服务环境设置 `AURORA_KMS_SYNC_COMMIT=1` 强制同步，或设置 `AURORA_KMS_CLEAR_COPY=1` 恢复内存清理时的全屏拷贝。
 
-当前单连接器、首选模式，无硬件 overlay/cursor、HDR 或完整热插拔处理。vsync 按所选 mode 周期调度，尚未锁定硬件 vblank。CPU 复制性能、多线程、多窗口及跨进程 metadata 语义需要继续验证。真机光标拖影与首显延迟尚未完成修复验收。
+## 测试入口
 
-接口来源和固定提交见 [第三方说明](../../docs/third-party.md)。
+[扫描输出探针](../tests/egl-scanout-cycle-probe.cpp) 覆盖 36 帧局部更新、呈现围栏及逐像素比对。它在可写虚拟测试层中使用匹配的 OHOS EGL、allocator 和 Composer；宿主不能用系统 libEGL 替代这些目标库。另有 [帧标记探针](../tests/frame-marker-probe.cpp)、[逐帧诊断分析](../tools/analyze-frame-content.py) 和 [原生呈现间隔汇总](../tools/summarize-native-direct-presents.py)。分析同一次启动的日志时以 boot ID 为边界。
+
+[启动交接单测](../tests/boot-handoff-test.cpp) 可直接用宿主 C++17 编译。它验证动画交接仅在本轮启动窗口有效，并在完成后 2 秒停止等待。
