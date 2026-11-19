@@ -28,6 +28,7 @@ HarmonyOS 镜像通过[百度网盘](https://pan.baidu.com/s/1DmrbZjC8IqnzeOEG4j
 
 - [构建环境与流程](docs/build.md)：依赖、固定版本、脚本入口及复现缺口。
 - [硬件与系统服务适配](ports/hardware/README.md)。
+- [USB 与 J514 音频](ports/audio/README.md)。
 - [运行与原生启动说明](docs/running.md)：预览包使用方式和原生部署边界。
 - [跳过 OOBE 进入开发桌面](docs/oobe-development-desktop.md)：原装停止接口、离线初始化标志、代码和回退。
 - [第三方来源与许可](docs/third-party.md)：Aurora、OpenHarmony、Mesa 等上游材料。
@@ -38,6 +39,7 @@ ports/
 ├── kernel/      # 内核补丁、AccessToken 与 ashmem
 ├── graphics/    # DRM allocator/composer、EGL 桥接与 Mesa 补丁
 ├── hardware/   # 电池、照明、存储、传感器、Wi-Fi 和模块加载
+├── audio/      # ALSA 播放与实验性 J514 音频
 ├── bluetooth/  # Linux HCI 传输适配
 ├── firmware/   # Asahi 固件转换源码
 ├── initramfs/   # 启动、模块加载与自动日志收集

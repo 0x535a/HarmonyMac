@@ -14,7 +14,9 @@
 | Asahi 无线固件转换模块 | [AsahiLinux/asahi-installer](https://github.com/AsahiLinux/asahi-installer)，`e93743d52178b3e26e428fa05174ef549abf30cb` | MIT，保留原始通知、[许可](../ports/firmware/asahi_vendorfw/LICENSE)及[文件哈希](../ports/firmware/asahi_vendorfw/SOURCE.json) |
 | kmod 与 FUSE 辅助实现 | `ports/hardware/` | 保留文件的 [LGPL-2.1-or-later 许可](../LICENSES/LGPL-2.1-or-later.txt)。kmod 34.2 是外部构建输入 |
 | UserAuth 软件后端 | [OpenHarmony drivers_peripheral](https://github.com/openharmony/drivers_peripheral)，`8cd47d4bb09a4d160e8b713b2fbccf8d41e2025f`，`user_auth/hdi_service` | 保留 Apache-2.0。仓库收录本项目的文件存储实现和对上游的补丁 |
-| LLVM、libdrm、zlib、expat、BusyBox | 外部构建输入 | 未捆绑源码或二进制；分发构建产物时另行保留其许可与对应源码要求 |
+| Audio VDI 接口头 | [OpenHarmony drivers_peripheral](https://github.com/openharmony/drivers_peripheral)，`8cd47d4bb09a4d160e8b713b2fbccf8d41e2025f`，`audio/interfaces/sound/v1_0` | 保留 Apache-2.0 和 Huawei Device 版权 |
+| J514 音频路由 | [Asahi Linux ALSA UCM](https://github.com/AsahiLinux/alsa-ucm-conf-asahi) 的 macaudio/CS42L84 配置与 Aurora 的 macaudio 驱动 | 参考上游混音器路由。未捆绑固件、上游配置或热保护守护进程 |
+| LLVM、libdrm、zlib、expat、BusyBox、ALSA | 外部构建输入 | 未捆绑源码或二进制；分发构建产物时另行保留其许可与对应源码要求 |
 
 历史记录中 `DisplayComposerType.idl` SHA256 为 `8be06dca7cba51335a31d31c8f979e20ffa3dd8149b7ce181667f5bcb3dc41a0`；drivers_peripheral codeload tar SHA256 为 `372784383662527e8beea176a1290252efb3c50188e761db8a0e3fd64c2e89f3`。
 
