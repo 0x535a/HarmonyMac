@@ -42,6 +42,24 @@ class OobeTools(unittest.TestCase):
             with self.assertRaises(ValueError):prepare(source,Path(folder)/'unsafe.db')
             self.assertFalse((Path(folder)/'unsafe.db').exists())
 
+    def test_ota_version_option(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source=Path(folder)/'settingsdata.db'
+            output=Path(folder)/'prepared-ota.db'
+            with sqlite3.connect(source) as db:
+                for table in ['SETTINGSDATA','USER_SETTINGSDATA_100','USER_SETTINGSDATA_SECURE_100']:
+                    db.execute(f'CREATE TABLE {table} (KEYWORD TEXT PRIMARY KEY, VALUE TEXT)')
+                db.execute('INSERT INTO SETTINGSDATA VALUES (?,?)',('device_provisioned','0'))
+            result=prepare(source,output,100,'OpenHarmony 6.0.0.110')
+            self.assertEqual(len(result['changes']),11)
+            with sqlite3.connect(output) as db:
+                for table in ['SETTINGSDATA','USER_SETTINGSDATA_100','USER_SETTINGSDATA_SECURE_100']:
+                    rows=dict(db.execute(f'SELECT * FROM {table}'))
+                    self.assertEqual(rows['settings.control.ota_old_version'],'OpenHarmony 6.0.0.110')
+                    self.assertEqual(rows['buildversionrelease'],'OpenHarmony 6.0.0.110')
+                    self.assertEqual(rows['is_ota_finished'],'1')
+                self.assertEqual(db.execute('PRAGMA integrity_check').fetchone(),('ok',))
+
     def test_guest_dry_run(self):
         script=ROOT/'ports/tests/enter-development-desktop.sh'
         result=subprocess.run(['sh',str(script),'--wait','0','--settle','0','--dry-run'],

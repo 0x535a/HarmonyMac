@@ -22,7 +22,7 @@ for line in (source/'modules.dep').read_text().splitlines():
     name, values=line.split(':',1);deps[name]=values.split()
 byname={Path(k).stem.replace('-','_'):k for k in deps}
 builtins={Path(x).stem.replace('-','_') for x in (source/'modules.builtin').read_text().splitlines()}
-seed='pinctrl-apple-gpio gpio-shared-proxy spi-apple i2c-pasemi-platform spmi-apple-controller apple_nvmem_spmi macsmc macsmc-power gpio-macsmc sn201202x tps6598x phy-apple-atc dwc3-apple thunderbolt_apple onboard_usb_dev mux-apple-display-crossbar phy-apple-dptx typec_displayport apple-sart nvme-apple apple-rtkit-helper apple-sio apple-dockchannel dockchannel-hid spi-hid-apple-of hid-apple hid-magicmouse hid-multitouch macsmc-input apple-pmp appledrm'.split()
+seed='pinctrl-apple-gpio gpio-shared-proxy spi-apple i2c-pasemi-platform spmi-apple-controller apple_nvmem_spmi macsmc macsmc-power macsmc-reboot gpio-macsmc sn201202x tps6598x phy-apple-atc dwc3-apple thunderbolt_apple onboard_usb_dev mux-apple-display-crossbar phy-apple-dptx typec_displayport apple-sart nvme-apple apple-rtkit-helper apple-sio apple-dockchannel dockchannel-hid spi-hid-apple-of hid-apple hid-magicmouse hid-multitouch macsmc-input apple-pmp appledrm'.split()
 soft={}
 for line in (source/'modules.softdep').read_text().splitlines():
     bits=line.split()
@@ -41,13 +41,14 @@ def add(name):
 for name in seed:add(name)
 assert not missing, f'Missing module requirements: {missing}'
 a.output.mkdir(parents=True);root=a.output/'root';root.mkdir()
-for name in ['bin','dev','proc','sys','run','newroot','etc','lib/firmware']:(root/name).mkdir(parents=True,exist_ok=True)
+for name in ['bin','sbin','dev','proc','sys','run','newroot','etc','lib/firmware']:(root/name).mkdir(parents=True,exist_ok=True)
 for name in ['init','bin/busybox','bin/binder-setup','bin/input-device-permissions']:
     f=a.bootstrap/name
     assert f.read_bytes()[:4]==b'\x7fELF',name
     shutil.copyfile(f,root/name);(root/name).chmod(0o755)
 for name in 'sh [ mount mkdir cat grep echo sleep test switch_root modprobe insmod blkid find readlink uname ls chown chmod sync poweroff setsid dmesg'.split():
     (root/'bin'/name).symlink_to('busybox')
+(root/'sbin/modprobe').symlink_to('../bin/modprobe')
 assert a.ext4_uuid.read_bytes()[:4] == b'\x7fELF'
 shutil.copyfile(a.ext4_uuid,root/'bin/ext4-uuid');(root/'bin/ext4-uuid').chmod(0o755)
 for name,src in [('kernel-log',a.kernel_log),('fat-uuid',a.fat_uuid)]:

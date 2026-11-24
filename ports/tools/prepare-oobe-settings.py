@@ -14,7 +14,7 @@ from pathlib import Path
 import sqlite3
 
 
-def prepare(source, output, user_id=100):
+def prepare(source, output, user_id=100, ota_version=None):
     source=Path(source).resolve(strict=True)
     output=Path(output).absolute()
     if not source.is_file() or not 0<=user_id<=999999:
@@ -34,8 +34,20 @@ def prepare(source, output, user_id=100):
         if memory.execute('PRAGMA integrity_check').fetchall()!=[('ok',)]:
             raise ValueError('Input SQLite integrity check failed')
         changes=[]
-        for table,key in [('SETTINGSDATA','device_provisioned'),
-                          (f'USER_SETTINGSDATA_SECURE_{user_id}','user_setup_complete')]:
+        updates=[('SETTINGSDATA','device_provisioned','1'),
+                 (f'USER_SETTINGSDATA_SECURE_{user_id}','user_setup_complete','1')]
+        if ota_version:
+            existing_tables={row[0] for row in memory.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+            ota_tables=[t for t in ('SETTINGSDATA',f'USER_SETTINGSDATA_{user_id}',
+                                    f'USER_SETTINGSDATA_SECURE_{user_id}') if t in existing_tables]
+            for table in ota_tables:
+                updates.extend([
+                    (table,'settings.control.ota_old_version',ota_version),
+                    (table,'buildversionrelease',ota_version),
+                    (table,'is_ota_finished','1'),
+                ])
+        for table,key,value in updates:
             columns={row[1].upper() for row in memory.execute(f'PRAGMA table_info("{table}")')}
             if not {'KEYWORD','VALUE'}<=columns:
                 raise ValueError(f'Unsupported schema: {table} requires KEYWORD and VALUE')
@@ -43,10 +55,10 @@ def prepare(source, output, user_id=100):
             if len(rows)>1:
                 raise ValueError(f'Ambiguous duplicate setting: {key}')
             if rows:
-                memory.execute(f'UPDATE "{table}" SET VALUE=? WHERE KEYWORD=?',('1',key))
+                memory.execute(f'UPDATE "{table}" SET VALUE=? WHERE KEYWORD=?',(value,key))
             else:
-                memory.execute(f'INSERT INTO "{table}" (KEYWORD,VALUE) VALUES (?,?)',(key,'1'))
-            changes.append(dict(table=table,key=key,before=rows[0][0] if rows else None,after='1'))
+                memory.execute(f'INSERT INTO "{table}" (KEYWORD,VALUE) VALUES (?,?)',(key,value))
+            changes.append(dict(table=table,key=key,before=rows[0][0] if rows else None,after=value))
         memory.commit()
         if memory.execute('PRAGMA integrity_check').fetchall()!=[('ok',)]:
             raise ValueError('Prepared SQLite integrity check failed')
@@ -72,8 +84,10 @@ def main():
     p.add_argument('source',type=Path)
     p.add_argument('output',type=Path)
     p.add_argument('--user-id',type=int,default=100)
+    p.add_argument('--ota-version',default=None,
+                   help='Optional displayVersion (e.g. "OpenHarmony 6.0.0.110") to align SCBOtaManager keys')
     a=p.parse_args()
-    try:print(json.dumps(prepare(a.source,a.output,a.user_id),indent=2))
+    try:print(json.dumps(prepare(a.source,a.output,a.user_id,a.ota_version),indent=2))
     except (ValueError,OSError,sqlite3.Error) as error:p.exit(1,f'{error}\n')
 
 
