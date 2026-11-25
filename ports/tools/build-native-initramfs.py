@@ -11,6 +11,8 @@ p.add_argument('--kernel-log',type=Path,required=True)
 p.add_argument('--fat-uuid',type=Path,required=True)
 p.add_argument('--output',type=Path,required=True)
 p.add_argument('--release',default='7.2.11-aurora-hmos-j514s-test7')
+p.add_argument('--early-wcc-wifi',action='store_true',
+               help='Include brcmfmac and WCC support for early BCM4387 probing')
 a=p.parse_args()
 release=a.release
 assert re.fullmatch(r'7\.2\.11-aurora-hmos-j514s-test[0-9]+',release)
@@ -22,7 +24,7 @@ for line in (source/'modules.dep').read_text().splitlines():
     name, values=line.split(':',1);deps[name]=values.split()
 byname={Path(k).stem.replace('-','_'):k for k in deps}
 builtins={Path(x).stem.replace('-','_') for x in (source/'modules.builtin').read_text().splitlines()}
-seed='pinctrl-apple-gpio gpio-shared-proxy spi-apple i2c-pasemi-platform spmi-apple-controller apple_nvmem_spmi macsmc macsmc-power macsmc-reboot gpio-macsmc sn201202x tps6598x phy-apple-atc dwc3-apple thunderbolt_apple onboard_usb_dev mux-apple-display-crossbar phy-apple-dptx typec_displayport apple-sart nvme-apple apple-rtkit-helper apple-sio apple-dockchannel dockchannel-hid spi-hid-apple-of hid-apple hid-magicmouse hid-multitouch macsmc-input apple-pmp appledrm'.split()
+seed='pinctrl-apple-gpio gpio-shared-proxy spi-apple i2c-pasemi-platform spmi-apple-controller apple_nvmem_spmi macsmc macsmc-power gpio-macsmc sn201202x tps6598x phy-apple-atc dwc3-apple thunderbolt_apple onboard_usb_dev mux-apple-display-crossbar phy-apple-dptx typec_displayport apple-sart nvme-apple apple-rtkit-helper apple-sio apple-dockchannel dockchannel-hid spi-hid-apple-of hid-apple hid-magicmouse hid-multitouch macsmc-input apple-pmp appledrm'.split()
 soft={}
 for line in (source/'modules.softdep').read_text().splitlines():
     bits=line.split()
@@ -39,6 +41,12 @@ def add(name):
     for dep in deps[path]:add(Path(dep).stem)
     for dep in soft.get(norm,[]):add(dep)
 for name in seed:add(name)
+reboot_module=byname.get('macsmc_reboot')
+if reboot_module is not None:
+    add('macsmc-reboot')
+if a.early_wcc_wifi and 'brcmfmac' not in builtins:
+    add('brcmfmac')
+    add('brcmfmac-wcc')
 assert not missing, f'Missing module requirements: {missing}'
 a.output.mkdir(parents=True);root=a.output/'root';root.mkdir()
 for name in ['bin','sbin','dev','proc','sys','run','newroot','etc','lib/firmware']:(root/name).mkdir(parents=True,exist_ok=True)
@@ -61,6 +69,11 @@ shutil.copyfile(Path(__file__).resolve().parents[1]/'initramfs/native-battery-re
 (root/'bin/dmesg').unlink();(root/'bin/dmesg').symlink_to('kernel-log')
 native_script=(Path(__file__).resolve().parents[1]/'initramfs/native-stage-init').read_text()
 native_script=native_script.replace('7.2.11-aurora-hmos-j514s-test7',release).replace('native-ready-test7','native-ready-'+release.rsplit('-',1)[-1])
+if reboot_module in selected:
+    # Keep the frozen R1 initializer usable while loading this driver before coldplug.
+    smc_modules='macsmc macsmc-power gpio-macsmc'
+    assert native_script.count(smc_modules)==1
+    native_script=native_script.replace(smc_modules,'macsmc macsmc-reboot macsmc-power gpio-macsmc')
 (root/'aurora-init').write_text(native_script);(root/'aurora-init').chmod(0o755)
 dest=root/'lib/modules'/release;dest.mkdir(parents=True)
 for path in sorted(selected):
@@ -75,7 +88,14 @@ shutil.copyfile(ash,dest/'hmos_ashmem.ko')
 (dest/'modules.dep').write_text('\n'.join(k+': '+ ' '.join(deps[k]) for k in sorted(selected))+'\nhmos_ashmem.ko:\n')
 # This static BusyBox was built with empty DEFAULT_MODULES_DIR/DEPMOD_FILE.
 # Generate an explicit dependency/alias loader, without invoking its modprobe.
-loader=['#!/bin/sh', 'export PATH=/bin', 'case "$1" in']
+loader=[
+    '#!/bin/sh',
+    'export PATH=/bin',
+    # Linux request_module() invokes modprobe with -q -- before the module name.
+    'if [ "${1-}" = -q ]; then shift; fi',
+    'if [ "${1-}" = -- ]; then shift; fi',
+    'case "${1-}" in',
+]
 all_deps={k:deps[k] for k in selected};all_deps['hmos_ashmem.ko']=[]
 aliases={Path(k).stem.replace('-','_'):[] for k in all_deps}
 for line in (dest/'modules.alias').read_text().splitlines():
