@@ -31,6 +31,7 @@ HarmonyOS 镜像通过[百度网盘](https://pan.baidu.com/s/1DmrbZjC8IqnzeOEG4j
 - [USB 与 J514 音频](ports/audio/README.md)。
 - [运行与原生启动说明](docs/running.md)：预览包使用方式和原生部署边界。
 - [跳过 OOBE 进入开发桌面](docs/oobe-development-desktop.md)：原装停止接口、离线初始化标志、代码和回退。
+- [Apple M1 Max / J316c 真机适配记录](docs/j316c-m1-max.md)：内置 NVMe 启动、120 FPS Asahi GPU、BCM4387 与 J316c 硬件实测边界。
 - [第三方来源与许可](docs/third-party.md)：Aurora、OpenHarmony、Mesa 等上游材料。
 - [贡献与仓库检查](CONTRIBUTING.md)。
 
