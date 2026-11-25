@@ -30,7 +30,9 @@
 
 ## 原生启动经验
 
-外置 USB-C 根盘依赖 Type-C 图，显示驱动提供部分路由 provider。将 appledrm 延迟到挂载根盘后加载会形成启动顺序依赖，因此原生 bootstrap 在查找根盘前加载相关显示模块。PMP 驱动也必须包含在 initramfs 中并先于 appledrm 加载。
+J514S 的外置 USB-C 根盘依赖 Type-C 图，显示驱动提供部分路由 provider。将 appledrm 延迟到挂载根盘后加载会形成启动顺序依赖，因此原生 bootstrap 在查找根盘前加载相关显示模块。PMP 驱动也必须包含在 initramfs 中并先于 appledrm 加载。
+
+J316c 从内置 NVMe 根分区启动时，`macsmc-reboot` 需要在 SMC 看门狗复位前写入 `KERNEL_STARTED`。驱动和固件要求见 [J316c 实测记录](devices/j316c-m1-max.md)。
 
 保留的原生脚本含历史根 UUID、精确内核版本和日志目标约束，是特定验证基线；迁移至另一台机器前需要逐项调整，见 [运行说明](running.md)。
 

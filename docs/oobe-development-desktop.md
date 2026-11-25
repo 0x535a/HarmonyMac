@@ -69,11 +69,17 @@ python3 ports/tools/prepare-oobe-settings.py settingsdata.db settingsdata.prepar
 python3 ports/tools/prepare-oobe-settings.py settingsdata_slave.db settingsdata_slave.prepared.db --user-id 100
 ```
 
-工具只在内存中修改上述两项并生成新文件，检查 SQLite 完整性，打印输入／输出 SHA256 和旧值；拒绝覆盖输入、已有输出、缺失表以及带 journal sidecar 的输入。无关设置保留。它不挂载镜像、不替换 rootfs 中的数据库，也不安装启动脚本。
+工具默认设置上述两项。它在内存中修改数据库并生成新文件，检查 SQLite 完整性，打印输入／输出 SHA256 和旧值；拒绝覆盖输入或已有输出，以及缺少必需表或带 journal sidecar 的输入。无关设置保留。它不挂载镜像、不替换 rootfs 中的数据库，也不安装启动脚本。
 
 确认两个输出和备份完整后，再由自己的离线镜像流程安装，保留各原文件的 UID、GID、权限及 SELinux 标签。生成文件默认为 0600、属于运行工具的宿主用户，不能把这些元数据直接当作 guest 的正确值。所有数据库必须在系统停止时成组替换；启动前检查文件系统。
 
 这些值只影响本地首次启动／初始化分支。历史候选设置后，向导仍可能重新进入，最终仍使用运行时 force-stop。不能将数据库修改称为永久关闭 OOBE 或商业激活成功。
+
+### J316c 的 OTA 版本设置
+
+J316c 真机测试中，`const.build.ver.physical` 未设置时，`SCBOtaManager` 会再次打开向导。若遇到这一情况，在上述两个数据库副本的命令中都加上 `--ota-version "<目标系统的 deviceInfo.displayVersion>"`。测试镜像的值为 `OpenHarmony 6.0.0.110`，应以实际目标系统为准。
+
+该选项在全局和指定用户的现有目标表内将 `settings.control.ota_old_version`、`buildversionrelease` 设为传入版本，并将 `is_ota_finished` 设为 `1`。真机上写入这些值的结果见 [J316c 实测记录](devices/j316c-m1-max.md#已真机验证)。
 
 ## 预装清单尝试及其限制
 

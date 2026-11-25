@@ -19,4 +19,4 @@ kretprobe。是否满足完整鸿蒙安全策略仍需单独验收。
 `CONFIG_ACCESS_TOKENID=y`。这些步骤只应用到独立测试内核构建树。
 原生启动的内核和 modules 必须使用同一构建版本，不加载旧麒麟模块。
 
-test8 由 [独立构建脚本](../tools/build-kernel8-legacy.sh) 在固定 test7 上启用 legacy XTables 与 PCIe 热插拔，保留原有 y/m 选项。虚拟环境已验证防火墙表、模块自动装载、PCIe 插拔和混合页接口，原生验证范围见 [状态页](../../docs/status.md)。
+test8 由 [独立构建脚本](../tools/build-kernel8-legacy.sh) 在固定 test7 上启用 legacy XTables 与 PCIe 热插拔，保留原有 y/m 选项。虚拟环境已验证防火墙表、模块自动装载、PCIe 插拔和混合页接口，原生验证范围见 [J514S 验证记录](../../docs/devices/j514s-m3-pro.md)。
